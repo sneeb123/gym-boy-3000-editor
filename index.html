@@ -137,6 +137,7 @@ const toastEl = document.getElementById('toast');
 
 const state = { token:null, login:null, owner:null, repo:null, isPrivate:null };
 let cur = null;           // открытый файл: { path, sha, data, dirty }
+let inFlight = false;     // идёт обмен с облаком (защита от параллельных перечитываний)
 let toastTimer = null;
 
 /* ── утилиты ─────────────────────────────────────────────────────────── */
@@ -460,61 +461,67 @@ async function fetchRows(sec, files){
 }
 
 async function showFiles(){
-  cur = null;
-  document.title = 'Gym-Boy 3000 :: веб-редактор — файлы';
-  busy(true, 'ЗАПРОС РЕПОЗИТОРИЯ…');
-  const sectionsRows = [];
-  let fatal = null;
-  // Сначала корень репозитория: узнаём, какие папки вообще есть, и не
-  // запрашиваем отсутствующие. Списку их 404 и не мешали (папка ещё не
-  // создана синком приложения), но красные строки в консоли выглядят
-  // как поломка.
-  let rootNames = null;
+  if (inFlight) return;
+  inFlight = true;
   try {
-    const root = await api('GET', `/repos/${state.owner}/${state.repo}/contents/`);
-    rootNames = new Set((Array.isArray(root) ? root : []).map(x => x.name));
-  } catch (e) {
-    if (e.status !== 404) { busy(false); renderFiles([], e); return; }
-    rootNames = new Set();               // репозиторий ещё пустой
-  }
-  const parentNames = {};
-  for (const sec of SECTIONS) {
-    const parts = sec.dir.split('/');
-    let exists = rootNames.has(parts[0]);
-    if (exists && parts.length > 1) {
-      if (!parentNames[parts[0]]) {
-        try {
-          const ls = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${parts[0]}`);
-          parentNames[parts[0]] = new Set((Array.isArray(ls) ? ls : []).map(x => x.name));
-        } catch (e) {
-          if (e.status === 404) parentNames[parts[0]] = new Set();
-          else { fatal = e; break; }
+    cur = null;
+    document.title = 'Gym-Boy 3000 :: веб-редактор — файлы';
+    busy(true, 'ЗАПРОС РЕПОЗИТОРИЯ…');
+    const sectionsRows = [];
+    let fatal = null;
+    // Сначала корень репозитория: узнаём, какие папки вообще есть, и не
+    // запрашиваем отсутствующие. Списку их 404 и не мешали (папка ещё не
+    // создана синком приложения), но красные строки в консоли выглядят
+    // как поломка.
+    let rootNames = null;
+    try {
+      const root = await api('GET', `/repos/${state.owner}/${state.repo}/contents/`);
+      rootNames = new Set((Array.isArray(root) ? root : []).map(x => x.name));
+    } catch (e) {
+      if (e.status !== 404) { busy(false); renderFiles([], e); return; }
+      rootNames = new Set();               // репозиторий ещё пустой
+    }
+    const parentNames = {};
+    for (const sec of SECTIONS) {
+      const parts = sec.dir.split('/');
+      let exists = rootNames.has(parts[0]);
+      if (exists && parts.length > 1) {
+        if (!parentNames[parts[0]]) {
+          try {
+            const ls = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${parts[0]}`);
+            parentNames[parts[0]] = new Set((Array.isArray(ls) ? ls : []).map(x => x.name));
+          } catch (e) {
+            if (e.status === 404) parentNames[parts[0]] = new Set();
+            else { fatal = e; break; }
+          }
         }
+        exists = parentNames[parts[0]].has(parts[1]);
       }
-      exists = parentNames[parts[0]].has(parts[1]);
+      if (!exists) continue;               // папки ещё нет — пропустить, как в приложении
+      let items;
+      try {
+        items = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${sec.dir}`);
+      } catch (e) {
+        if (e.status === 404) continue;    // исчезла между проверками — пропустить
+        fatal = e;
+        break;
+      }
+      const files = (Array.isArray(items) ? items : []).filter(f => f.name.endsWith('.json'));
+      let rows;
+      try {
+        rows = await fetchRows(sec, files);
+      } catch (e) {
+        // список важнее точных меток: упало чтение содержимого — показать хотя бы имена
+        rows = files.map(f => ({ name: f.name, path: f.path,
+          meta: metaFromName(f.name), kind: sec.kind, sha: f.sha }));
+      }
+      sectionsRows.push({ sec, rows });
     }
-    if (!exists) continue;               // папки ещё нет — пропустить, как в приложении
-    let items;
-    try {
-      items = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${sec.dir}`);
-    } catch (e) {
-      if (e.status === 404) continue;    // исчезла между проверками — пропустить
-      fatal = e;
-      break;
-    }
-    const files = (Array.isArray(items) ? items : []).filter(f => f.name.endsWith('.json'));
-    let rows;
-    try {
-      rows = await fetchRows(sec, files);
-    } catch (e) {
-      // список важнее точных меток: упало чтение содержимого — показать хотя бы имена
-      rows = files.map(f => ({ name: f.name, path: f.path,
-        meta: metaFromName(f.name), kind: sec.kind, sha: f.sha }));
-    }
-    sectionsRows.push({ sec, rows });
+    busy(false);
+    renderFiles(sectionsRows, fatal);
+  } finally {
+    inFlight = false;
   }
-  busy(false);
-  renderFiles(sectionsRows, fatal);
 }
 
 function renderFiles(sectionsRows, fatal){
@@ -903,7 +910,9 @@ async function deleteFile(){
   btn.disabled = true;
   busy(true, 'УДАЛЕНИЕ…');
   try {
-    await deleteByPath(cur.path, cur.sha);
+    inFlight = true;
+    try { await deleteByPath(cur.path, cur.sha); }
+    finally { inFlight = false; }
     busy(false);
     toast('✔ УДАЛЕНО — ' + cur.path);
     cur = null;
@@ -935,7 +944,9 @@ async function listDelete(btn){
   btn.disabled = true;
   busy(true, 'УДАЛЕНИЕ…');
   try {
-    await deleteByPath(path, btn.dataset.sha || '');
+    inFlight = true;
+    try { await deleteByPath(path, btn.dataset.sha || ''); }
+    finally { inFlight = false; }
     busy(false);
     toast('✔ УДАЛЕНО — ' + path);
     await showFiles();
@@ -983,6 +994,13 @@ window.__gb3000 = {
 };
 
 /* ── запуск ──────────────────────────────────────────────────────────── */
+
+// Возврат на вкладку: список статичен между действиями, а пользователь мог
+// удалить/создать файлы в другой вкладке (или с телефона) — перечитываем.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state.token && state.owner &&
+      !cur && !inFlight) showFiles();
+});
 
 (async function boot(){
   const t = localStorage.getItem(LS_TOKEN);
