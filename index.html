@@ -465,12 +465,40 @@ async function showFiles(){
   busy(true, 'ЗАПРОС РЕПОЗИТОРИЯ…');
   const sectionsRows = [];
   let fatal = null;
+  // Сначала корень репозитория: узнаём, какие папки вообще есть, и не
+  // запрашиваем отсутствующие. Списку их 404 и не мешали (папка ещё не
+  // создана синком приложения), но красные строки в консоли выглядят
+  // как поломка.
+  let rootNames = null;
+  try {
+    const root = await api('GET', `/repos/${state.owner}/${state.repo}/contents/`);
+    rootNames = new Set((Array.isArray(root) ? root : []).map(x => x.name));
+  } catch (e) {
+    if (e.status !== 404) { busy(false); renderFiles([], e); return; }
+    rootNames = new Set();               // репозиторий ещё пустой
+  }
+  const parentNames = {};
   for (const sec of SECTIONS) {
+    const parts = sec.dir.split('/');
+    let exists = rootNames.has(parts[0]);
+    if (exists && parts.length > 1) {
+      if (!parentNames[parts[0]]) {
+        try {
+          const ls = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${parts[0]}`);
+          parentNames[parts[0]] = new Set((Array.isArray(ls) ? ls : []).map(x => x.name));
+        } catch (e) {
+          if (e.status === 404) parentNames[parts[0]] = new Set();
+          else { fatal = e; break; }
+        }
+      }
+      exists = parentNames[parts[0]].has(parts[1]);
+    }
+    if (!exists) continue;               // папки ещё нет — пропустить, как в приложении
     let items;
     try {
       items = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${sec.dir}`);
     } catch (e) {
-      if (e.status === 404) continue;      // папки ещё нет — пропустить, как в приложении
+      if (e.status === 404) continue;    // исчезла между проверками — пропустить
       fatal = e;
       break;
     }
