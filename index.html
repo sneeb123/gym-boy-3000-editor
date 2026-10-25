@@ -385,11 +385,80 @@ function bindCommonHead(){
   };
 }
 
+/* Метаданные из имени файла — запасной план, если тело прочитать не удалось. */
+function metaFromName(name){
+  const d = /(\d{4}-\d{2}-\d{2})/.exec(name);
+  const n = /(\d+)/.exec(name.replace(/\d{4}-\d{2}-\d{2}/, ''));
+  return { date: d ? d[1] : null, workout_number: n ? Number(n[1]) : null };
+}
+
+/** Свежайшие сверху: дата ↓, номер ↓, имя ↑. */
+function byWorkout(a, b){
+  const am = a.meta || {}, bm = b.meta || {};
+  return (bm.date || '').localeCompare(am.date || '') ||
+         (bm.workout_number || 0) - (am.workout_number || 0) ||
+         a.name.localeCompare(b.name);
+}
+
+/* Заголовок записи: { head: «ПРОГРАММА 8», rest: « · 25.10.2026 · 2 упр. — заметки» }. */
+function entryParts(m, kind, isResult){
+  m = m || {};
+  const num = m.workout_number != null ? ` ${m.workout_number}` : '';
+  const date = m.date ? ` · ${fmtDate(m.date)}` : '';
+  const extra = isResult && m.duration_seconds != null
+    ? ` · ${Math.round(m.duration_seconds / 60)} мин` : '';
+  const exn = Array.isArray(m.exercises) ? ` · ${m.exercises.length} упр.` : '';
+  const note = m.notes ? ` — ${String(m.notes).slice(0, 60)}` : '';
+  return { head: `${kind}${num}`, rest: `${date}${extra}${exn}${note}` };
+}
+
+function sectionHtml(sec, rows){
+  const isResult = sec.dir === 'results';
+  const items = rows.map(r => {
+    const p = entryParts(r.meta, sec.kind, isResult);
+    return `<li data-path="${esc(r.path)}">
+      <div class="frow"><span class="fkind">${esc(p.head)}</span>
+        <span>${esc(p.rest)}</span></div></li>`;
+  }).join('');
+  return `<h2>${sec.title}</h2>
+    ${sec.hint ? `<p class="sec-hint">${sec.hint}</p>` : ''}
+    ${items ? `<ul class="filelist">${items}</ul>`
+            : `<p class="faint">— пусто</p>`}`;
+}
+
+/*
+ * Содержимое файлов в листинге папки НЕ приходит (тот же глюк, что ловило
+ * приложение в октябре: GET папки отдаёт только имена) — поэтому каждая
+ * тренировка дочитывается отдельным запросом: из неё берутся номер, дата,
+ * длительность и заметки. Запросов немного, идёт по 6 одновременно.
+ */
+async function fetchRows(sec, files){
+  const rows = [];
+  let done = 0;
+  const queue = files.slice();
+  await Promise.all(Array.from({ length: Math.min(6, queue.length) || 1 }, async () => {
+    while (queue.length) {
+      const f = queue.shift();
+      let meta = null;
+      try {
+        const full = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${f.path}`);
+        meta = JSON.parse(b64decode(full.content));
+      } catch (e) {
+        meta = metaFromName(f.name);
+      }
+      rows.push({ name: f.name, path: f.path, meta, kind: sec.kind });
+      busy(true, `ЧТЕНИЕ ${++done}/${files.length}…`);
+    }
+  }));
+  rows.sort(byWorkout);
+  return rows;
+}
+
 async function showFiles(){
   cur = null;
   document.title = 'Gym-Boy 3000 :: веб-редактор — файлы';
   busy(true, 'ЗАПРОС РЕПОЗИТОРИЯ…');
-  const parts = [];
+  const sectionsRows = [];
   let fatal = null;
   for (const sec of SECTIONS) {
     let items;
@@ -400,56 +469,98 @@ async function showFiles(){
       fatal = e;
       break;
     }
-    const rows = (Array.isArray(items) ? items : [])
-      .filter(f => f.name.endsWith('.json'))
-      .map(f => {
-        let meta = null;
-        try { meta = JSON.parse(b64decode(f.content)); } catch (e) { /* покажем только имя */ }
-        return { name: f.name, path: f.path, meta };
-      });
-    rows.sort(byWorkout);
-    parts.push(sectionHtml(sec, rows));
+    const files = (Array.isArray(items) ? items : []).filter(f => f.name.endsWith('.json'));
+    sectionsRows.push({ sec, rows: await fetchRows(sec, files) });
   }
   busy(false);
+  renderFiles(sectionsRows, fatal);
+}
+
+function renderFiles(sectionsRows, fatal){
+  const allRows = sectionsRows.flatMap(s => s.rows);
+  document.title = 'Gym-Boy 3000 :: веб-редактор — файлы';
   app.innerHTML = commonHead() + (fatal
     ? `<div class="errbox show">✕ ${esc(fatal.message)}
          <br><button class="btn small" id="retry">Повторить</button></div>`
-    : (parts.join('') ||
-       `<p class="dim">В репозитории пока нет папок с данными.
-          Они появятся после первого синка из приложения.</p>`)
+    : `<p><button id="neww" class="btn primary">+ новая тренировка</button></p>`
+      + (sectionsRows.map(({sec, rows}) => sectionHtml(sec, rows)).join('')
+         || `<p class="dim">В репозитории пока нет папок с данными.
+              Они появятся после первого синка из приложения — или создайте
+              первую тренировку кнопкой выше.</p>`)
   ) + `<p class="faint">файл правится прямо в облаке: приложение подхватит
       изменения при следующей синхронизации.</p>`;
   bindCommonHead();
   const retry = document.getElementById('retry');
   if (retry) retry.onclick = showFiles;
+  const neww = document.getElementById('neww');
+  if (neww) neww.onclick = () => showNewWorkout(allRows);
   app.querySelectorAll('li[data-path]').forEach(li => {
     li.onclick = () => openEditor(li.dataset.path);
   });
 }
 
-function byWorkout(a, b){
-  const am = a.meta || {}, bm = b.meta || {};
-  return (bm.date || '').localeCompare(am.date || '') ||
-         (bm.workout_number || 0) - (am.workout_number || 0) ||
-         a.name.localeCompare(b.name);
+/* ── новая тренировка ────────────────────────────────────────────────── */
+
+function todayIso(){
+  const t = new Date();
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
 }
 
-function sectionHtml(sec, rows){
-  const items = rows.map(r => {
-    const m = r.meta || {};
-    const num = m.workout_number != null ? ` ${m.workout_number}` : '';
-    const date = m.date ? ` · ${fmtDate(m.date)}` : '';
-    const exn = Array.isArray(m.exercises) ? ` · ${m.exercises.length} упр.` : '';
-    return `<li data-path="${esc(r.path)}">
-      <div class="frow"><span class="fkind">${sec.kind}${esc(num)}</span>
-        <span>${esc(date)}</span><span class="fmeta">${esc(exn)}</span>
-        <span class="fmeta">${esc(m.meta ? String(m.meta).slice(0, 60) : '')}</span>
-      </div></li>`;
+/** Новая программа: копия базы, очищенная от результатов, + свежие номер и дата. */
+function buildNewProgram(base, allRows){
+  let d;
+  if (base && typeof base === 'object') d = JSON.parse(JSON.stringify(base));
+  else d = { notes: null, exercises: [] };
+  d.schema = 'gymboy-program/1';
+  delete d.started_at;
+  delete d.finished_at;
+  delete d.duration_seconds;
+  d.exercises = Array.isArray(d.exercises) ? d.exercises : [];
+  if (!d.exercises.length) d.exercises.push(newExercise(8));
+  d.exercises.forEach(ex => {
+    ex.sets = Array.isArray(ex.sets) ? ex.sets : [];
+    ex.sets.forEach(s => { s.actual_reps = null; s.pulse = null; });
+  });
+  const maxNum = allRows.reduce(
+    (mx, r) => Math.max(mx, (r.meta && r.meta.workout_number) || 0), 0);
+  d.workout_number = maxNum + 1;
+  d.date = todayIso();
+  return d;
+}
+
+function startNewProgram(base, allRows){
+  cur = { path: null, sha: null, isNew: true, dirty: true,
+          data: buildNewProgram(base, allRows) };
+  renderEditor();
+}
+
+function showNewWorkout(allRows){
+  document.title = 'Gym-Boy 3000 :: веб-редактор — новая тренировка';
+  const options = allRows.map((r, i) => {
+    const p = entryParts(r.meta, r.kind, String(r.kind).includes('РЕЗУЛЬТАТ'));
+    return `<option value="${i}">${esc(p.head + p.rest)}</option>`;
   }).join('');
-  return `<h2>${sec.title}</h2>
-    ${sec.hint ? `<p class="sec-hint">${sec.hint}</p>` : ''}
-    ${items ? `<ul class="filelist">${items}</ul>`
-            : `<p class="faint">— пусто</p>`}`;
+  app.innerHTML = commonHead() + `
+    <p><a href="#" id="back">← к файлам</a></p>
+    <h2>НОВАЯ ТРЕНИРОВКА</h2>
+    <div class="panel">
+      <label><span class="lbl">взять за основу</span>
+        <select id="base">
+          <option value="-1">— с нуля (пустая таблица)</option>
+          ${options}
+        </select></label>
+      <p class="faint">скопируются упражнения, веса и плановые повторения;
+      факт и пульс очистятся, номер и дата поставятся новые.
+      Новый файл уйдёт в <code>programs/pending</code> — телефон заберёт его при синке.</p>
+      <button id="create" class="btn primary">Создать</button>
+    </div>`;
+  bindCommonHead();
+  document.getElementById('back').onclick = e => { e.preventDefault(); showFiles(); };
+  document.getElementById('create').onclick = () => {
+    const v = document.getElementById('base').value;
+    const base = v === '-1' ? null : allRows[Number(v)].meta;
+    startNewProgram(base, allRows);
+  };
 }
 
 /* ── редактор ────────────────────────────────────────────────────────── */
@@ -495,7 +606,7 @@ function renderEditor(){
     : '';
   app.innerHTML = `
     <p><a href="#" id="back">← к файлам</a>
-       <span class="faint"> · ${esc(cur.path)}</span></p>
+       <span class="faint"> · ${cur.isNew ? 'новая программа → programs/pending' : esc(cur.path)}</span></p>
     ${publicWarn()}
     ${badSchema ? `<div class="warn">⚠ неизвестная схема «${esc(d.schema)}» — правки могут её исказить</div>` : ''}
     ${times}
@@ -673,25 +784,41 @@ async function saveFile(){
     return;
   }
   box.classList.remove('show');
+  if (cur.isNew) {
+    // имя нового файла строится из актуальных номера и даты
+    cur.path = `programs/pending/program-${cur.data.workout_number}-${cur.data.date}.json`;
+  }
   busy(true, 'ЗАПИСЬ…');
   try {
     const res = await api('PUT',
       `/repos/${state.owner}/${state.repo}/contents/${cur.path}`, {
-        message: `Gym-Boy 3000: правка в веб-редакторе — ${cur.path.split('/').pop()}`,
+        message: cur.isNew
+          ? `Gym-Boy 3000: новая программа — ${cur.path.split('/').pop()}`
+          : `Gym-Boy 3000: правка в веб-редакторе — ${cur.path.split('/').pop()}`,
         content: b64encode(serialize()),
-        sha: cur.sha,
+        sha: cur.sha || undefined,
       });
     cur.sha = res.content.sha;
+    const wasNew = cur.isNew;
+    cur.isNew = false;
     cur.dirty = false;
     document.getElementById('savehint').textContent =
-      'сохранено ' + new Date().toLocaleTimeString('ru-RU');
+      (wasNew ? `сохранено в ${cur.path} · ` : 'сохранено ') +
+      new Date().toLocaleTimeString('ru-RU');
     toast('✔ СОХРАНЕНО — файл записан в облако');
   } catch (e) {
     if (e.status === 409 || (e.status === 422 && /sha/i.test(e.message))) {
-      box.innerHTML = `<div>⚠ файл в облаке изменился с момента открытия.</div>
-        <button class="btn small" id="reload">Перечитать из облака (правки будут потеряны)</button>`;
-      box.classList.add('show');
-      document.getElementById('reload').onclick = () => openEditor(cur.path);
+      if (cur.isNew) {
+        box.innerHTML = `<div>⚠ программа с таким номером и датой уже есть
+          (${esc(cur.path)}). Поменяйте номер или дату наверху — либо откройте
+          существующий файл из списка.</div>`;
+        box.classList.add('show');
+      } else {
+        box.innerHTML = `<div>⚠ файл в облаке изменился с момента открытия.</div>
+          <button class="btn small" id="reload">Перечитать из облака (правки будут потеряны)</button>`;
+        box.classList.add('show');
+        document.getElementById('reload').onclick = () => openEditor(cur.path);
+      }
     } else {
       toast('не сохранено: ' + e.message, 'err');
     }
@@ -713,6 +840,21 @@ window.__gb3000 = {
   data: () => cur && cur.data,
   serialize: () => cur && serialize(),
   validate: () => cur ? validate() : null,
+  entryParts,
+  metaFromName,
+  buildNew: buildNewProgram,
+  startNew: (base, rows) => startNewProgram(base, rows),
+  sort: byWorkout,
+  todayIso,
+  debugList(rows){
+    const sectionsRows = SECTIONS.map(sec => ({
+      sec,
+      rows: rows.filter(r => String(r.path).startsWith(sec.dir + '/'))
+               .map(r => ({ ...r, kind: sec.kind }))
+               .sort(byWorkout),
+    }));
+    renderFiles(sectionsRows, null);
+  },
 };
 
 /* ── запуск ──────────────────────────────────────────────────────────── */
