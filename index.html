@@ -838,6 +838,9 @@ async function saveFile(){
     return;
   }
   box.classList.remove('show');
+  const saveBtn = document.getElementById('save');
+  if (saveBtn.disabled) return;          // уже пишем — повторный клик игнорируем
+  saveBtn.disabled = true;
   if (cur.isNew) {
     // имя нового файла строится из актуальных номера и даты
     cur.path = `programs/pending/program-${cur.data.workout_number}-${cur.data.date}.json`;
@@ -877,6 +880,7 @@ async function saveFile(){
       toast('не сохранено: ' + e.message, 'err');
     }
   }
+  saveBtn.disabled = false;
   busy(false);
 }
 
