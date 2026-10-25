@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gym-Boy 3000 :: веб-редактор</title>
+<style>
+:root{
+  --bg:#050a05; --panel:#0b160b; --fg:#8cff5e; --dim:#4c9c36; --faint:#35702a;
+  --line:#1d4212; --accent:#d9ffb3; --warn:#ffd23e; --err:#ff6b6b;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--bg); color:var(--fg);
+  font:15px/1.5 "Consolas","Courier New",monospace;
+  min-height:100vh;
+}
+/* лёгкие строки развёртки, как на ЭЛТ */
+body::after{
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:99;
+  background:repeating-linear-gradient(0deg, rgba(0,0,0,.15) 0 1px, transparent 1px 3px);
+}
+#wrap{max-width:780px;margin:0 auto;padding:0 14px 110px}
+#top{
+  display:flex; justify-content:space-between; align-items:baseline; gap:10px;
+  border-bottom:1px solid var(--line); padding:12px 0 9px; letter-spacing:.09em; flex-wrap:wrap;
+}
+#top .title b{color:var(--accent)}
+#status{color:var(--dim); text-transform:uppercase; font-size:13px}
+#status.busy{color:var(--warn); animation:blink 1s steps(2) infinite}
+#status.ok{color:var(--fg)}
+@keyframes blink{50%{opacity:.25}}
+h2{letter-spacing:.12em; font-size:17px; margin:18px 0 8px; color:var(--accent)}
+.dim{color:var(--dim)}
+.faint{color:var(--faint); font-size:13px}
+.panel{border:1px solid var(--line); background:var(--panel); padding:12px 14px; margin:12px 0}
+.warn{border:1px solid var(--warn); color:var(--warn); background:rgba(255,210,62,.05); padding:9px 12px; margin:12px 0; font-size:14px}
+.errbox{border:1px solid var(--err); color:var(--err); background:rgba(255,107,107,.05); padding:9px 12px; margin:12px 0; display:none}
+.errbox.show{display:block}
+a{color:var(--accent)}
+code{color:var(--accent); background:#020402; padding:0 4px; border:1px solid var(--line)}
+.btn{
+  display:inline-block; background:transparent; color:var(--fg);
+  border:1px solid var(--fg); padding:8px 16px; cursor:pointer;
+  font:inherit; letter-spacing:.08em; text-transform:uppercase; text-decoration:none;
+}
+.btn:hover{background:rgba(140,255,94,.12)}
+.btn.primary{background:var(--fg); color:#041704; font-weight:bold}
+.btn.primary:hover{background:var(--accent)}
+.btn.small{padding:3px 9px; font-size:12px}
+.btn.danger{border-color:var(--err); color:var(--err)}
+.btn.danger:hover{background:rgba(255,107,107,.12)}
+.btn[disabled]{opacity:.4; cursor:default}
+input,textarea,select{
+  background:#020402; border:1px solid var(--line); color:var(--fg);
+  font:inherit; padding:6px 8px; width:100%;
+}
+input:focus,textarea:focus{outline:none; border-color:var(--fg); box-shadow:0 0 7px rgba(140,255,94,.3)}
+input[type=password]{letter-spacing:.14em}
+label{display:block; margin:8px 0}
+label .lbl{display:block; color:var(--dim); font-size:12px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:3px}
+table{border-collapse:collapse; width:100%; margin:8px 0 4px}
+th{
+  color:var(--dim); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+  text-align:left; padding:4px 6px; border:1px solid var(--line); font-weight:normal;
+}
+td{border:1px solid var(--line); padding:3px 5px; vertical-align:middle}
+td.sn{color:var(--dim); text-align:center; width:34px}
+td.total{color:var(--accent); white-space:nowrap; text-align:right; min-width:74px}
+td input{padding:5px 6px}
+td.act{width:34px; text-align:center}
+.tbl-scroll{overflow-x:auto}
+.card{border:1px solid var(--line); background:var(--panel); padding:10px 12px; margin:14px 0}
+.cardhead{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+.cardhead b{color:var(--accent); letter-spacing:.08em; font-size:13px}
+.cardhead .exname{flex:1; min-width:150px; font-weight:bold}
+.cardhead .barw{display:flex; gap:6px; align-items:center; color:var(--dim); font-size:13px; white-space:nowrap}
+.cardhead .barw input{width:72px}
+.rowflex{display:flex; gap:12px; flex-wrap:wrap}
+.rowflex>label{flex:1; min-width:150px}
+.savebar{
+  position:sticky; bottom:0; background:var(--bg);
+  border-top:1px solid var(--line); padding:12px 0; margin-top:16px;
+  display:flex; gap:10px; flex-wrap:wrap;
+}
+#toast{
+  position:fixed; top:14px; left:50%; transform:translateX(-50%);
+  z-index:200; max-width:92vw; padding:9px 16px; display:none;
+  border:1px solid var(--fg); background:var(--panel); color:var(--accent);
+  box-shadow:0 0 14px rgba(140,255,94,.25);
+}
+#toast.err{border-color:var(--err); color:var(--err); box-shadow:0 0 14px rgba(255,107,107,.25)}
+.filelist{list-style:none; margin:8px 0 18px; padding:0}
+.filelist li{border:1px solid var(--line); margin-top:-1px}
+.filelist li:hover{background:rgba(140,255,94,.07); cursor:pointer}
+.filelist .frow{padding:9px 12px; display:flex; gap:12px; align-items:baseline; flex-wrap:wrap}
+.filelist .fkind{color:var(--accent); letter-spacing:.06em}
+.filelist .fmeta{color:var(--dim); font-size:13px}
+.sec-hint{color:var(--faint); font-size:12px; margin:14px 0 0; letter-spacing:.05em}
+ol{margin:8px 0 14px; padding-left:22px}
+ol li{margin:4px 0}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header id="top">
+    <span class="title"><b>GYM-BOY 3000</b> <span class="dim">::</span> ВЕБ-РЕДАКТОР</span>
+    <span id="status">OFFLINE</span>
+  </header>
+  <main id="app"></main>
+</div>
+<div id="toast"></div>
+<script>
+'use strict';
+
+/*
+ * Веб-редактор файлов тренировок в приватном облаке Gym-Boy 3000 (GitHub).
+ * Один файл, без сборки и зависимостей: таблица вместо JSON, правки коммитятся
+ * через Contents API тем же форматом (gymboy-program/1, gymboy-result/1).
+ *
+ * Вход — fine-grained PAT, вставленный один раз и сохранённый в localStorage.
+ * Device flow из браузера невозможен: github.com не отдаёт CORS на /login/*
+ * (проверено 2026-10-25: OPTIONS → 404, в ответе нет Access-Control-Allow-Origin).
+ * api.github.com при этом отдаёт Access-Control-Allow-Origin: * — обмен работает
+ * и со страницы на GitHub Pages, и с локального файла (file://).
+ */
+
+const DEFAULT_REPO = 'gymboy-data';
+const LS_TOKEN = 'gb3000_web.token';
+const LS_REPO  = 'gb3000_web.repo';
+
+const app = document.getElementById('app');
+const statusEl = document.getElementById('status');
+const toastEl = document.getElementById('toast');
+
+const state = { token:null, login:null, owner:null, repo:null, isPrivate:null };
+let cur = null;           // открытый файл: { path, sha, data, dirty }
+let toastTimer = null;
+
+/* ── утилиты ─────────────────────────────────────────────────────────── */
+
+function esc(s){
+  return String(s ?? '').replace(/[&<>"]/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+/** '2026-10-25' → '25.10.2026' */
+function fmtDate(iso){
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : (iso ? String(iso) : '—');
+}
+
+/** Число из ввода: пусто/мусор → null, запятая допустима ('27,5' → 27.5). */
+function parseNum(v){
+  if (v == null) return null;
+  const s = String(v).trim().replace(',', '.');
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+function fmtKg(n){
+  return String(Math.round(n * 100) / 100);
+}
+
+function b64decode(s){
+  const bin = atob(s.replace(/\s+/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+function b64encode(s){
+  const bytes = new TextEncoder().encode(s);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+function setStatus(text, cls){
+  statusEl.textContent = text;
+  statusEl.className = cls || '';
+}
+
+function busy(on, label){
+  if (on) setStatus('● ' + (label || 'ОБМЕН…'), 'busy');
+  else setStatus(state.owner ? `● ${state.owner}/${state.repo}` : '● СВЯЗЬ', 'ok');
+}
+
+function toast(msg, kind){
+  toastEl.textContent = msg;
+  toastEl.className = kind === 'err' ? 'err' : '';
+  toastEl.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.style.display = 'none'; }, 4200);
+}
+
+function markDirty(){
+  if (cur) cur.dirty = true;
+}
+
+/* ── GitHub API ──────────────────────────────────────────────────────── */
+
+async function api(method, path, body){
+  let res;
+  try {
+    res = await fetch('https://api.github.com' + path, {
+      method,
+      headers: {
+        'Authorization': 'Bearer ' + state.token,
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (e) {
+    throw new Error('нет связи с api.github.com');
+  }
+  if (res.status === 401) {
+    forgetToken();
+    throw new Error('токен недействителен или истёк — войдите заново');
+  }
+  let json = null;
+  try { json = await res.json(); } catch (e) { /* пустое тело — ок */ }
+  if (!res.ok) {
+    const err = new Error(String(json && json.message || ('HTTP ' + res.status)).slice(0, 140));
+    err.status = res.status;
+    throw err;
+  }
+  return json;
+}
+
+function forgetToken(){
+  state.token = null;
+  localStorage.removeItem(LS_TOKEN);
+}
+
+/* ── экран входа (PAT) ───────────────────────────────────────────────── */
+
+function showTokenScreen(msg){
+  document.title = 'Gym-Boy 3000 :: веб-редактор — вход';
+  setStatus('● OFFLINE', '');
+  app.innerHTML = `
+    <h2>ВХОД</h2>
+    <p>Редактор правит файлы тренировок в приватном облачном репозитории
+       <code>${esc(DEFAULT_REPO)}</code>. Браузеру нужен токен GitHub — один раз:
+       он сохранится в этом браузере и будет уходить только на api.github.com.</p>
+    ${msg ? `<p class="errbox show">✕ ${esc(msg)}</p>` : ''}
+    <div class="panel">
+      <ol>
+        <li>Нажмите кнопку — откроется страница токенов GitHub.</li>
+        <li><b>Repository access</b> → <i>Only select repositories</i> → выберите
+            <code>${esc(DEFAULT_REPO)}</code>.</li>
+        <li><b>Permissions → Repository permissions → Contents</b> →
+            <i>Read and write</i>. Остальное не нужно.</li>
+        <li><b>Generate token</b> — и вставьте строку <code>github_pat_…</code> сюда.</li>
+      </ol>
+      <a class="btn primary" href="https://github.com/settings/personal-access-tokens/new"
+         target="_blank" rel="noopener">Создать токен ↗</a>
+      <p><input id="pat" type="password" autocomplete="off" spellcheck="false"
+                placeholder="github_pat_… или классический PAT"></p>
+      <button id="go" class="btn">Войти</button>
+      <details><summary class="dim">Подойдёт и классический PAT</summary>
+        <p class="dim">github.com/settings/tokens/new → отметьте <code>repo</code> →
+        вставьте в то же поле. Fine-grained лучше: доступ только к одному репозиторию.</p>
+      </details>
+    </div>`;
+  const go = async () => {
+    const t = document.getElementById('pat').value.trim();
+    if (!t) { toast('вставьте токен', 'err'); return; }
+    state.token = t;
+    busy(true, 'АВТОРИЗАЦИЯ…');
+    try {
+      state.login = (await api('GET', '/user')).login;
+      localStorage.setItem(LS_TOKEN, t);
+      await pickRepo();
+    } catch (e) {
+      state.token = null;
+      busy(false);
+      showTokenScreen(e.message);
+      return;
+    }
+    busy(false);
+  };
+  document.getElementById('go').onclick = go;
+  document.getElementById('pat').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+}
+
+/* ── выбор репозитория ───────────────────────────────────────────────── */
+
+async function pickRepo(){
+  const tried = [];
+  const saved = localStorage.getItem(LS_REPO);
+  if (saved) tried.push(saved);
+  tried.push(state.login + '/' + DEFAULT_REPO);
+  for (const full of tried) {
+    if (await tryRepo(full)) return showFiles();
+  }
+  await showRepoScreen();
+}
+
+/** Проверяет доступ к репо и запоминает; false, если не вышло. */
+async function tryRepo(full){
+  const parts = full.split('/').filter(Boolean);
+  if (parts.length !== 2) return false;
+  try {
+    const info = await api('GET', `/repos/${parts[0]}/${parts[1]}`);
+    state.owner = parts[0];
+    state.repo = parts[1];
+    state.isPrivate = info.private === true;
+    localStorage.setItem(LS_REPO, full);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function showRepoScreen(prefill){
+  busy(true, 'СПИСОК РЕПОЗИТОРИЕВ…');
+  let picks = [];
+  try {
+    picks = (await api('GET', '/user/repos?per_page=100&sort=updated'))
+      .map(r => r.full_name).filter(n => /gym/i.test(n)).slice(0, 6);
+  } catch (e) { /* без списка — просто ручной ввод */ }
+  busy(false);
+  app.innerHTML = `
+    <h2>РЕПОЗИТОРИЙ ДАННЫХ</h2>
+    <p class="dim">Токен действует, но репозиторий <code>${esc(state.login)}/${esc(DEFAULT_REPO)}</code>
+    не найден. Укажите, где лежат данные Gym-Boy 3000.</p>
+    ${picks.length ? `<p>${picks.map(n =>
+      `<button class="btn small pick" data-repo="${esc(n)}">${esc(n)}</button>`).join(' ')}</p>` : ''}
+    <div class="panel">
+      <label><span class="lbl">владелец / репозиторий</span>
+        <input id="rfull" placeholder="${esc(state.login)}/${esc(DEFAULT_REPO)}"
+               value="${esc(prefill || '')}"></label>
+      <button id="rgo" class="btn">Проверить</button>
+    </div>`;
+  app.querySelectorAll('.pick').forEach(b => { b.onclick = () => useRepo(b.dataset.repo); });
+  const go = () => useRepo(document.getElementById('rfull').value.trim());
+  document.getElementById('rgo').onclick = go;
+  document.getElementById('rfull').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+}
+
+async function useRepo(full){
+  busy(true, 'ПРОВЕРКА…');
+  const ok = await tryRepo(full);
+  busy(false);
+  if (ok) showFiles();
+  else showRepoScreen(full);
+}
+
+function publicWarn(){
+  return state.isPrivate === false
+    ? `<div class="warn">⚠ РЕПОЗИТОРИЙ ПУБЛИЧНЫЙ — данные тренировок видны всему интернету.
+       Сделайте его приватным: Settings → General → Danger Zone → Change visibility.
+       (Редактор, как и приложение с v0.10.1, только предупреждает — решение за вами.)</div>`
+    : '';
+}
+
+/* ── список файлов ───────────────────────────────────────────────────── */
+
+const SECTIONS = [
+  { dir: 'programs/pending',  kind: 'ПРОГРАММА', title: 'НОВЫЕ ПРОГРАММЫ',
+    hint: 'приложение заберёт их при следующем синке и перенесёт в принятые' },
+  { dir: 'programs/imported', kind: 'ПРОГРАММА', title: 'ПРИНЯТЫЕ ПРОГРАММЫ', hint: '' },
+  { dir: 'results',           kind: 'РЕЗУЛЬТАТ', title: 'РЕЗУЛЬТАТЫ', hint: '' },
+];
+
+function commonHead(){
+  return `
+    <p class="faint">репозиторий: ${esc(state.owner)}/${esc(state.repo)}
+      · <a href="#" id="chg">сменить</a>
+      · <a href="#" id="out">выйти</a></p>
+    ${publicWarn()}`;
+}
+
+function bindCommonHead(){
+  document.getElementById('chg').onclick = e => { e.preventDefault(); showRepoScreen(); };
+  document.getElementById('out').onclick = e => {
+    e.preventDefault();
+    if (cur && cur.dirty && !confirm('Есть несохранённые правки — выйти всё равно?')) return;
+    forgetToken();
+    showTokenScreen();
+  };
+}
+
+async function showFiles(){
+  cur = null;
+  document.title = 'Gym-Boy 3000 :: веб-редактор — файлы';
+  busy(true, 'ЗАПРОС РЕПОЗИТОРИЯ…');
+  const parts = [];
+  let fatal = null;
+  for (const sec of SECTIONS) {
+    let items;
+    try {
+      items = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${sec.dir}`);
+    } catch (e) {
+      if (e.status === 404) continue;      // папки ещё нет — пропустить, как в приложении
+      fatal = e;
+      break;
+    }
+    const rows = (Array.isArray(items) ? items : [])
+      .filter(f => f.name.endsWith('.json'))
+      .map(f => {
+        let meta = null;
+        try { meta = JSON.parse(b64decode(f.content)); } catch (e) { /* покажем только имя */ }
+        return { name: f.name, path: f.path, meta };
+      });
+    rows.sort(byWorkout);
+    parts.push(sectionHtml(sec, rows));
+  }
+  busy(false);
+  app.innerHTML = commonHead() + (fatal
+    ? `<div class="errbox show">✕ ${esc(fatal.message)}
+         <br><button class="btn small" id="retry">Повторить</button></div>`
+    : (parts.join('') ||
+       `<p class="dim">В репозитории пока нет папок с данными.
+          Они появятся после первого синка из приложения.</p>`)
+  ) + `<p class="faint">файл правится прямо в облаке: приложение подхватит
+      изменения при следующей синхронизации.</p>`;
+  bindCommonHead();
+  const retry = document.getElementById('retry');
+  if (retry) retry.onclick = showFiles;
+  app.querySelectorAll('li[data-path]').forEach(li => {
+    li.onclick = () => openEditor(li.dataset.path);
+  });
+}
+
+function byWorkout(a, b){
+  const am = a.meta || {}, bm = b.meta || {};
+  return (bm.date || '').localeCompare(am.date || '') ||
+         (bm.workout_number || 0) - (am.workout_number || 0) ||
+         a.name.localeCompare(b.name);
+}
+
+function sectionHtml(sec, rows){
+  const items = rows.map(r => {
+    const m = r.meta || {};
+    const num = m.workout_number != null ? ` ${m.workout_number}` : '';
+    const date = m.date ? ` · ${fmtDate(m.date)}` : '';
+    const exn = Array.isArray(m.exercises) ? ` · ${m.exercises.length} упр.` : '';
+    return `<li data-path="${esc(r.path)}">
+      <div class="frow"><span class="fkind">${sec.kind}${esc(num)}</span>
+        <span>${esc(date)}</span><span class="fmeta">${esc(exn)}</span>
+        <span class="fmeta">${esc(m.meta ? String(m.meta).slice(0, 60) : '')}</span>
+      </div></li>`;
+  }).join('');
+  return `<h2>${sec.title}</h2>
+    ${sec.hint ? `<p class="sec-hint">${sec.hint}</p>` : ''}
+    ${items ? `<ul class="filelist">${items}</ul>`
+            : `<p class="faint">— пусто</p>`}`;
+}
+
+/* ── редактор ────────────────────────────────────────────────────────── */
+
+function newSet(){
+  return { set_number: null, plates_weight_kg: null, total_weight_kg: null,
+           planned_reps: null, actual_reps: null, pulse: null };
+}
+
+function newExercise(bar){
+  return { name: '', bar_weight_kg: bar ?? 8, notes: null, sets: [newSet(), newSet(), newSet()] };
+}
+
+async function openEditor(path){
+  busy(true, 'ЗАГРУЗКА ФАЙЛА…');
+  try {
+    const f = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${path}`);
+    let data;
+    try { data = JSON.parse(b64decode(f.content)); }
+    catch (e) {
+      busy(false);
+      toast('файл не является корректным JSON', 'err');
+      return;
+    }
+    data.exercises = Array.isArray(data.exercises) ? data.exercises : [];
+    data.exercises.forEach(ex => { ex.sets = Array.isArray(ex.sets) ? ex.sets : []; });
+    cur = { path, sha: f.sha, data, dirty: false };
+    renderEditor();
+  } catch (e) {
+    toast('не удалось открыть: ' + e.message, 'err');
+  }
+  busy(false);
+}
+
+function renderEditor(){
+  document.title = 'Gym-Boy 3000 :: веб-редактор — правка';
+  const d = cur.data;
+  const isResult = String(d.schema || '').includes('result');
+  const badSchema = d.schema && !String(d.schema).startsWith('gymboy-');
+  const times = (d.started_at || d.finished_at)
+    ? `<p class="faint">тренировка: ${esc(fmtDate(d.started_at))} — ${esc(d.finished_at || '')},
+         ${esc(d.duration_seconds != null ? Math.round(d.duration_seconds / 60) + ' мин' : '')}</p>`
+    : '';
+  app.innerHTML = `
+    <p><a href="#" id="back">← к файлам</a>
+       <span class="faint"> · ${esc(cur.path)}</span></p>
+    ${publicWarn()}
+    ${badSchema ? `<div class="warn">⚠ неизвестная схема «${esc(d.schema)}» — правки могут её исказить</div>` : ''}
+    ${times}
+    <div class="panel">
+      <div class="rowflex">
+        <label><span class="lbl">тренировка №</span>
+          <input id="wnum" type="number" inputmode="numeric" value="${esc(d.workout_number ?? '')}"></label>
+        <label><span class="lbl">дата</span>
+          <input id="wdate" type="date" value="${esc(d.date || '')}"></label>
+      </div>
+      <label><span class="lbl">${isResult ? 'заметки' : 'план / заметки'}</span>
+        <textarea id="wnotes" rows="2">${esc(d.notes || '')}</textarea></label>
+    </div>
+    <div id="exercises"></div>
+    <button id="addex" class="btn">+ упражнение</button>
+    <div class="errbox" id="errbox"></div>
+    <div class="savebar">
+      <button id="save" class="btn primary">Сохранить в облако</button>
+      <button id="cancel" class="btn">Отмена</button>
+      <span class="faint" id="savehint"></span>
+    </div>`;
+  document.getElementById('wnum').oninput = e => { d.workout_number = parseNum(e.target.value); markDirty(); };
+  document.getElementById('wdate').oninput = e => { d.date = e.target.value; markDirty(); };
+  document.getElementById('wnotes').oninput = e => { d.notes = e.target.value; markDirty(); };
+  document.getElementById('addex').onclick = () => {
+    const exs = d.exercises;
+    exs.push(newExercise(parseNum(exs[exs.length - 1]?.bar_weight_kg)));
+    markDirty();
+    renderEditor();
+  };
+  document.getElementById('save').onclick = saveFile;
+  document.getElementById('cancel').onclick = () => {
+    if (cur.dirty && !confirm('Закрыть без сохранения?')) return;
+    showFiles();
+  };
+  document.getElementById('back').onclick = e => {
+    e.preventDefault();
+    if (cur.dirty && !confirm('Есть несохранённые правки — уйти всё равно?')) return;
+    showFiles();
+  };
+  renderExercises();
+}
+
+function exerciseHtml(ex, i){
+  const rows = ex.sets.map((s, j) => {
+    const total = parseNum(s.plates_weight_kg);
+    const bar = parseNum(ex.bar_weight_kg);
+    const tot = total == null ? '—' : fmtKg(total + (bar ?? 0));
+    return `<tr>
+      <td class="sn">${j + 1}</td>
+      <td><input class="s-plates" inputmode="decimal" value="${esc(s.plates_weight_kg ?? '')}"></td>
+      <td class="total">${esc(tot)}</td>
+      <td><input class="s-plan" inputmode="numeric" value="${esc(s.planned_reps ?? '')}"></td>
+      <td><input class="s-act" inputmode="numeric" value="${esc(s.actual_reps ?? '')}"></td>
+      <td><input class="s-pulse" inputmode="numeric" value="${esc(s.pulse ?? '')}"></td>
+      <td class="act"><button class="btn small danger s-del" title="убрать подход">✕</button></td>
+    </tr>`;
+  }).join('');
+  return `<div class="card" data-ex="${i}">
+    <div class="cardhead">
+      <b>УПРАЖНЕНИЕ ${i + 1}</b>
+      <input class="exname" value="${esc(ex.name || '')}" placeholder="название упражнения">
+      <span class="barw"><span>гриф</span>
+        <input class="exbar" inputmode="decimal" value="${esc(ex.bar_weight_kg ?? '')}"><span>кг</span></span>
+      <button class="btn small danger del" title="убрать упражнение">✕</button>
+    </div>
+    <input class="exnotes" value="${esc(ex.notes || '')}" placeholder="заметки (темп, 1RM, …)">
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>№</th><th>блины, кг</th><th>итого, кг</th><th>план</th><th>факт</th><th>пульс</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <button class="btn small addset">+ подход</button>
+  </div>`;
+}
+
+function renderExercises(){
+  const box = document.getElementById('exercises');
+  const exs = cur.data.exercises;
+  box.innerHTML = exs.map(exerciseHtml).join('') ||
+    `<p class="dim">Упражнений нет — добавьте первое кнопкой ниже.</p>`;
+  exs.forEach((ex, i) => {
+    const card = box.querySelector(`[data-ex="${i}"]`);
+    card.querySelector('.exname').oninput = e => { ex.name = e.target.value; markDirty(); };
+    card.querySelector('.exbar').oninput = e => { ex.bar_weight_kg = parseNum(e.target.value); markDirty(); updateTotals(i); };
+    card.querySelector('.exnotes').oninput = e => { ex.notes = e.target.value; markDirty(); };
+    card.querySelector('.del').onclick = () => {
+      if (!confirm(`Убрать упражнение «${ex.name || i + 1}»?`)) return;
+      cur.data.exercises.splice(i, 1);
+      markDirty();
+      renderEditor();
+    };
+    const tbody = card.querySelector('tbody');
+    ex.sets.forEach((s, j) => {
+      const row = tbody.rows[j];
+      const bind = (cls, key) => {
+        row.querySelector('.' + cls).oninput = e => {
+          s[key] = parseNum(e.target.value);
+          markDirty();
+          if (key === 'plates_weight_kg') updateTotals(i);
+        };
+      };
+      bind('s-plates', 'plates_weight_kg');
+      bind('s-plan', 'planned_reps');
+      bind('s-act', 'actual_reps');
+      bind('s-pulse', 'pulse');
+      row.querySelector('.s-del').onclick = () => {
+        ex.sets.splice(j, 1);
+        markDirty();
+        renderEditor();
+      };
+    });
+    card.querySelector('.addset').onclick = () => {
+      ex.sets.push(newSet());
+      markDirty();
+      renderEditor();
+    };
+  });
+}
+
+/** «итого» пересчитывается на лету: блины + гриф */
+function updateTotals(i){
+  const card = document.querySelector(`[data-ex="${i}"]`);
+  if (!card) return;
+  const ex = cur.data.exercises[i];
+  const bar = parseNum(ex.bar_weight_kg) ?? 0;
+  ex.sets.forEach((s, j) => {
+    const cell = card.querySelector('tbody').rows[j]?.querySelector('.total');
+    if (!cell) return;
+    const p = parseNum(s.plates_weight_kg);
+    cell.textContent = p == null ? '—' : fmtKg(p + bar);
+  });
+}
+
+function validate(){
+  const errs = [];
+  const d = cur.data;
+  if (d.workout_number == null) errs.push('не указан номер тренировки');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date || '')) errs.push('дата не указана или не ГГГГ-ММ-ДД');
+  if (!d.exercises.length) errs.push('в тренировке нет упражнений');
+  d.exercises.forEach((ex, i) => {
+    const en = `упражнение ${i + 1}${ex.name ? ` «${ex.name}»` : ''}`;
+    if (!String(ex.name || '').trim()) errs.push(`${en}: нет названия`);
+    if (parseNum(ex.bar_weight_kg) == null) errs.push(`${en}: не указан вес грифа`);
+    if (!ex.sets.length) errs.push(`${en}: нет подходов`);
+    ex.sets.forEach((s, j) => {
+      if (parseNum(s.plates_weight_kg) == null) errs.push(`${en}, подход ${j + 1}: не указан вес блинов`);
+      if (s.planned_reps == null) errs.push(`${en}, подход ${j + 1}: не указаны плановые повторения`);
+    });
+  });
+  return errs;
+}
+
+/** Приводит подходы к каноническому виду (нумерация, итого = блины + гриф). */
+function serialize(){
+  const d = cur.data;
+  d.exercises.forEach(ex => {
+    const bar = parseNum(ex.bar_weight_kg) ?? 0;
+    ex.sets.forEach((s, j) => {
+      s.set_number = j + 1;
+      const plates = parseNum(s.plates_weight_kg);
+      s.plates_weight_kg = plates;
+      s.total_weight_kg = Math.round((plates + bar) * 100) / 100;
+    });
+    if (!String(ex.notes || '').trim()) ex.notes = null;
+  });
+  return JSON.stringify(d, null, 2) + '\n';
+}
+
+async function saveFile(){
+  const box = document.getElementById('errbox');
+  const errs = validate();
+  if (errs.length) {
+    box.innerHTML = errs.map(e => `<div>✕ ${esc(e)}</div>`).join('');
+    box.classList.add('show');
+    return;
+  }
+  box.classList.remove('show');
+  busy(true, 'ЗАПИСЬ…');
+  try {
+    const res = await api('PUT',
+      `/repos/${state.owner}/${state.repo}/contents/${cur.path}`, {
+        message: `Gym-Boy 3000: правка в веб-редакторе — ${cur.path.split('/').pop()}`,
+        content: b64encode(serialize()),
+        sha: cur.sha,
+      });
+    cur.sha = res.content.sha;
+    cur.dirty = false;
+    document.getElementById('savehint').textContent =
+      'сохранено ' + new Date().toLocaleTimeString('ru-RU');
+    toast('✔ СОХРАНЕНО — файл записан в облако');
+  } catch (e) {
+    if (e.status === 409 || (e.status === 422 && /sha/i.test(e.message))) {
+      box.innerHTML = `<div>⚠ файл в облаке изменился с момента открытия.</div>
+        <button class="btn small" id="reload">Перечитать из облака (правки будут потеряны)</button>`;
+      box.classList.add('show');
+      document.getElementById('reload').onclick = () => openEditor(cur.path);
+    } else {
+      toast('не сохранено: ' + e.message, 'err');
+    }
+  }
+  busy(false);
+}
+
+window.addEventListener('beforeunload', e => {
+  if (cur && cur.dirty) { e.preventDefault(); e.returnValue = ''; }
+});
+
+/* ── тестовые крючки (окружение разработки) ──────────────────────────── */
+
+window.__gb3000 = {
+  open(obj){
+    cur = { path: 'test/sample.json', sha: 'test', data: JSON.parse(JSON.stringify(obj)), dirty: false };
+    renderEditor();
+  },
+  data: () => cur && cur.data,
+  serialize: () => cur && serialize(),
+  validate: () => cur ? validate() : null,
+};
+
+/* ── запуск ──────────────────────────────────────────────────────────── */
+
+(async function boot(){
+  const t = localStorage.getItem(LS_TOKEN);
+  if (!t) return showTokenScreen();
+  state.token = t;
+  busy(true, 'АВТОРИЗАЦИЯ…');
+  try {
+    state.login = (await api('GET', '/user')).login;
+  } catch (e) {
+    busy(false);
+    return showTokenScreen('сохранённый токен не работает: ' + e.message);
+  }
+  busy(false);
+  await pickRepo();
+})();
+
+</script>
+</body>
+</html>
