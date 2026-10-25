@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gym-Boy 3000 :: веб-редактор</title>
+<title>Gym-Boy 3000 :: web editor</title>
 <style>
 :root{
   --bg:#050a05; --panel:#0b160b; --fg:#8cff5e; --dim:#4c9c36; --faint:#35702a;
@@ -27,6 +27,7 @@ body::after{
   border-bottom:1px solid var(--line); padding:12px 0 9px; letter-spacing:.09em; flex-wrap:wrap;
 }
 #top .title b{color:var(--accent)}
+#topright{display:flex; gap:10px; align-items:baseline}
 #status{color:var(--dim); text-transform:uppercase; font-size:13px}
 #status.busy{color:var(--warn); animation:blink 1s steps(2) infinite}
 #status.ok{color:var(--fg)}
@@ -106,8 +107,11 @@ ol li{margin:4px 0}
 <body>
 <div id="wrap">
   <header id="top">
-    <span class="title"><b>GYM-BOY 3000</b> <span class="dim">::</span> ВЕБ-РЕДАКТОР</span>
-    <span id="status">OFFLINE</span>
+    <span class="title"><b>GYM-BOY 3000</b> <span class="dim">::</span> <span id="titlesub">WEB EDITOR</span></span>
+    <span id="topright">
+      <button id="langbtn" class="btn small" title="Language / 语言 / Язык">EN</button>
+      <span id="status">OFFLINE</span>
+    </span>
   </header>
   <main id="app"></main>
 </div>
@@ -125,15 +129,467 @@ ol li{margin:4px 0}
  * (проверено 2026-10-25: OPTIONS → 404, в ответе нет Access-Control-Allow-Origin).
  * api.github.com при этом отдаёт Access-Control-Allow-Origin: * — обмен работает
  * и со страницы на GitHub Pages, и с локального файла (file://).
+ *
+ * Интерфейс на трёх языках — EN (по умолчанию) → 中文 → RU, той же схемой, что
+ * и в приложении: кнопка в шапке листает по кругу, выбор живёт в localStorage.
+ * Строки берутся из STRINGS в момент отрисовки, смена языка перерисовывает
+ * текущий экран (screen/rerender); незавершённая фоновая операция дорисуется
+ * уже на новом языке — когда завершится.
  */
 
 const DEFAULT_REPO = 'gymboy-data';
 const LS_TOKEN = 'gb3000_web.token';
 const LS_REPO  = 'gb3000_web.repo';
+const LS_LANG  = 'gb3000_web.lang';
 // Меняется при каждой публикации. Открытая вчера вкладка живёт со старым кодом
 // и ничего о нём не знает — поэтому при загрузке она сверяет APP_VER с живой
 // страницей (см. versionCheck перед boot) и перезагружается при расхождении.
-const APP_VER = 'v7';
+const APP_VER = 'v8';
+
+/* ── языки ───────────────────────────────────────────────────────────── */
+
+const LANG_ORDER = ['en', 'zh', 'ru'];
+
+const STRINGS = {
+
+en: {
+  selfLabel: 'EN',
+  titleSub: 'WEB EDITOR',
+  offline: 'OFFLINE',
+  exchange: 'SYNC…',
+  linkGeneric: '● LINK',
+  authorizing: 'SIGNING IN…',
+  listingRepos: 'FETCHING REPOSITORIES…',
+  checking: 'CHECKING…',
+  requestingRepo: 'FETCHING REPOSITORY…',
+  reading: (d, n) => `READING ${d}/${n}…`,
+  loadingFile: 'LOADING FILE…',
+  writing: 'WRITING…',
+  deleting: 'DELETING…',
+
+  errNoConn: 'cannot reach api.github.com',
+  errToken: 'token invalid or expired — sign in again',
+  savedTokenBad: 'the saved token does not work: ',
+
+  toastInsertToken: 'paste a token',
+  toastNotJson: 'the file is not valid JSON',
+  toastOpenFail: 'could not open: ',
+  toastSaved: '✔ SAVED — the file is written to the cloud',
+  toastSaveFail: 'not saved: ',
+  toastDeleted: '✔ DELETED — ',
+  toastDelFail: 'not deleted: ',
+
+  tSub: 'web editor',
+  tSignIn: 'sign in',
+  tFiles: 'files',
+  tNew: 'new workout',
+  tEdit: 'edit',
+
+  hSignIn: 'SIGN IN',
+  intro: repo => `The editor edits workout files in the private cloud repository <code>${repo}</code>. The browser needs a GitHub token — entered once: it is stored in this browser and is only sent to api.github.com.`,
+  steps: repo => [
+    'Press the button — the GitHub token page will open.',
+    `<b>Repository access</b> → <i>Only select repositories</i> → pick <code>${repo}</code>.`,
+    '<b>Permissions → Repository permissions → Contents</b> → <i>Read and write</i>. Nothing else is needed.',
+    '<b>Generate token</b> — then paste the <code>github_pat_…</code> string here.',
+  ],
+  btnCreateToken: 'Create token ↗',
+  patPlaceholder: 'github_pat_… or a classic PAT',
+  btnSignIn: 'Sign in',
+  classicTitle: 'A classic PAT works too',
+  classicBody: 'github.com/settings/tokens/new → check <code>repo</code> → paste into the same field. Fine-grained is better: access to a single repository only.',
+
+  hRepo: 'DATA REPOSITORY',
+  repoNotFound: full => `The token works, but the repository <code>${full}</code> was not found. Point the editor at where the Gym-Boy 3000 data lives.`,
+  lblOwnerRepo: 'owner / repository',
+  btnCheck: 'Check',
+
+  publicRepoWarning: 'PUBLIC REPOSITORY — workout data is visible to the whole internet. Make it private: Settings → General → Danger Zone → Change visibility. (Like the app since v0.10.1, the editor only warns — the choice is yours.)',
+
+  kindProgram: 'PROGRAM',
+  kindResult: 'RESULT',
+  secNewTitle: 'NEW PROGRAMS',
+  secNewHint: 'the app picks these up on the next sync and moves them to accepted',
+  secAccTitle: 'ACCEPTED PROGRAMS',
+  secResTitle: 'RESULTS',
+
+  repoLbl: 'repository:',
+  change: 'change',
+  signout: 'sign out',
+  confirmExitDirty: 'There are unsaved changes — sign out anyway?',
+  ldelTitle: 'delete the file from the cloud (will ask to confirm)',
+  emptyList: '— empty',
+
+  btnRetry: 'Retry',
+  btnNewWorkout: '+ new workout',
+  emptyRepo: 'No data folders in the repository yet. They will appear after the first sync from the app — or create the first workout with the button above.',
+  footerHint: 'the file is edited right in the cloud: the app will pick up the changes on its next sync.',
+
+  minShort: 'min',
+  exShort: 'ex.',
+
+  backToFiles: '← to files',
+  hNewWorkout: 'NEW WORKOUT',
+  lblBase: 'base it on',
+  optScratch: '— from scratch (empty table)',
+  newHint: 'exercises, weights and planned reps are copied; actual reps and pulse are cleared; number and date are set to new ones. The new file goes to <code>programs/pending</code> — the phone will pick it up on sync.',
+  btnCreate: 'Create',
+
+  newProgramTag: 'new program → programs/pending',
+  badSchema: s => `unknown schema “${s}” — edits may distort it`,
+  timesLine: (a, b, dur) => `workout: ${a} — ${b}, ${dur}`,
+  lblWorkoutNo: 'workout #',
+  lblDate: 'date',
+  lblNotes: 'notes',
+  lblPlanNotes: 'plan / notes',
+  btnAddEx: '+ exercise',
+  btnSave: 'Save to cloud',
+  btnCancel: 'Cancel',
+  btnDelete: 'delete',
+  confirmDelete: 'delete for sure?',
+
+  lblExercise: n => `EXERCISE ${n}`,
+  phExName: 'exercise name',
+  lblBar: 'bar',
+  unitKg: 'kg',
+  delExTitle: 'remove exercise',
+  phExNotes: 'notes (tempo, 1RM, …)',
+  thNo: '#',
+  thPlates: 'plates, kg',
+  thTotal: 'total, kg',
+  thPlan: 'plan',
+  thAct: 'actual',
+  thPulse: 'pulse',
+  delSetTitle: 'remove set',
+  btnAddSet: '+ set',
+  emptyExercises: 'No exercises — add the first one with the button below.',
+  confirmDelEx: name => `Remove exercise “${name}”?`,
+  confirmCloseDirty: 'Close without saving?',
+  confirmLeaveDirty: 'There are unsaved changes — leave anyway?',
+
+  vNoNumber: 'workout number is not set',
+  vBadDate: 'date is missing or not YYYY-MM-DD',
+  vNoExercises: 'the workout has no exercises',
+  vExPrefix: (i, name) => `exercise ${i}${name ? ` “${name}”` : ''}`,
+  vNoName: en => `${en}: name is missing`,
+  vNoBar: en => `${en}: bar weight is not set`,
+  vNoSets: en => `${en}: no sets`,
+  vSetPlates: (en, j) => `${en}, set ${j}: plates weight is not set`,
+  vSetPlan: (en, j) => `${en}, set ${j}: planned reps are not set`,
+
+  savedTo: p => `saved to ${p} · `,
+  savedAt: 'saved ',
+  timeLocale: 'en-US',
+  conflictNew: p => `a program with this number and date already exists (${p}). Change the number or the date above — or open the existing file from the list.`,
+  conflictChanged: 'the file in the cloud has changed since it was opened.',
+  btnReload: 'Reload from the cloud (changes will be lost)',
+},
+
+zh: {
+  selfLabel: '中文',
+  titleSub: '网页编辑器',
+  offline: '离线',
+  exchange: '同步中…',
+  linkGeneric: '● 通讯',
+  authorizing: '登录中…',
+  listingRepos: '获取仓库列表…',
+  checking: '检查中…',
+  requestingRepo: '读取仓库…',
+  reading: (d, n) => `读取 ${d}/${n}…`,
+  loadingFile: '载入文件…',
+  writing: '写入中…',
+  deleting: '删除中…',
+
+  errNoConn: '无法连接 api.github.com',
+  errToken: '令牌无效或已过期——请重新登录',
+  savedTokenBad: '已保存的令牌不可用：',
+
+  toastInsertToken: '请粘贴令牌',
+  toastNotJson: '文件不是有效的 JSON',
+  toastOpenFail: '无法打开：',
+  toastSaved: '✔ 已保存——文件已写入云端',
+  toastSaveFail: '未保存：',
+  toastDeleted: '✔ 已删除——',
+  toastDelFail: '未删除：',
+
+  tSub: '网页编辑器',
+  tSignIn: '登录',
+  tFiles: '文件',
+  tNew: '新训练',
+  tEdit: '编辑',
+
+  hSignIn: '登录',
+  intro: repo => `编辑器用于修改私有云端仓库 <code>${repo}</code> 中的训练文件。浏览器需要一个 GitHub 令牌——只需输入一次：它保存在本浏览器中，且只会发送到 api.github.com。`,
+  steps: repo => [
+    '点击按钮——会打开 GitHub 令牌页面。',
+    `<b>Repository access</b> → <i>Only select repositories</i> → 选择 <code>${repo}</code>。`,
+    '<b>Permissions → Repository permissions → Contents</b> → <i>Read and write</i>。其他权限不需要。',
+    '<b>Generate token</b>——然后把 <code>github_pat_…</code> 字符串粘贴到这里。',
+  ],
+  btnCreateToken: '创建令牌 ↗',
+  patPlaceholder: 'github_pat_… 或经典 PAT',
+  btnSignIn: '登录',
+  classicTitle: '也可以使用经典 PAT',
+  classicBody: 'github.com/settings/tokens/new → 勾选 <code>repo</code> → 粘贴到同一输入框。细粒度令牌更好：只授权一个仓库。',
+
+  hRepo: '数据仓库',
+  repoNotFound: full => `令牌有效，但未找到仓库 <code>${full}</code>。请指定 Gym-Boy 3000 数据所在的仓库。`,
+  lblOwnerRepo: '所有者 / 仓库',
+  btnCheck: '检查',
+
+  publicRepoWarning: '仓库是公开的——训练数据对所有人可见。可在 Settings → General → Danger Zone → Change visibility 中设为私有。（与 v0.10.1 起的应用一样，编辑器只提醒——决定权在你。）',
+
+  kindProgram: '计划',
+  kindResult: '结果',
+  secNewTitle: '新计划',
+  secNewHint: '应用会在下次同步时取走并移入已采纳',
+  secAccTitle: '已采纳计划',
+  secResTitle: '结果',
+
+  repoLbl: '仓库：',
+  change: '更换',
+  signout: '退出',
+  confirmExitDirty: '有未保存的修改——仍要退出吗？',
+  ldelTitle: '从云端删除文件（需要确认）',
+  emptyList: '— 空',
+
+  btnRetry: '重试',
+  btnNewWorkout: '+ 新训练',
+  emptyRepo: '仓库中还没有数据文件夹。它们会出现在应用首次同步之后——也可以用上面的按钮创建第一个训练。',
+  footerHint: '文件直接在云端修改：应用会在下次同步时获取更改。',
+
+  minShort: '分钟',
+  exShort: '个动作',
+
+  backToFiles: '← 返回文件',
+  hNewWorkout: '新训练',
+  lblBase: '以此为基础',
+  optScratch: '——从零开始（空表格）',
+  newHint: '会复制动作、重量和计划次数；实际次数与心率会清空；编号和日期设为新的。新文件会存入 <code>programs/pending</code>——手机同步时会取走。',
+  btnCreate: '创建',
+
+  newProgramTag: '新计划 → programs/pending',
+  badSchema: s => `未知架构「${s}」——修改可能会损坏它`,
+  timesLine: (a, b, dur) => `训练：${a} — ${b}，${dur}`,
+  lblWorkoutNo: '训练 #',
+  lblDate: '日期',
+  lblNotes: '备注',
+  lblPlanNotes: '计划 / 备注',
+  btnAddEx: '+ 动作',
+  btnSave: '保存到云端',
+  btnCancel: '取消',
+  btnDelete: '删除',
+  confirmDelete: '确定删除？',
+
+  lblExercise: n => `动作 ${n}`,
+  phExName: '动作名称',
+  lblBar: '杠',
+  unitKg: '公斤',
+  delExTitle: '删除该动作',
+  phExNotes: '备注（节奏、1RM 等）',
+  thNo: '#',
+  thPlates: '杠铃片，公斤',
+  thTotal: '总计，公斤',
+  thPlan: '计划',
+  thAct: '实际',
+  thPulse: '心率',
+  delSetTitle: '删除该组',
+  btnAddSet: '+ 组',
+  emptyExercises: '还没有动作——用下面的按钮添加第一个。',
+  confirmDelEx: name => `删除动作「${name}」？`,
+  confirmCloseDirty: '不保存就关闭吗？',
+  confirmLeaveDirty: '有未保存的修改——仍要离开吗？',
+
+  vNoNumber: '未填写训练编号',
+  vBadDate: '日期未填写或不是 YYYY-MM-DD',
+  vNoExercises: '训练中没有动作',
+  vExPrefix: (i, name) => `动作 ${i}${name ? `「${name}」` : ''}`,
+  vNoName: en => `${en}：未填名称`,
+  vNoBar: en => `${en}：未填杠重`,
+  vNoSets: en => `${en}：没有组`,
+  vSetPlates: (en, j) => `${en}，第 ${j} 组：未填杠铃片重量`,
+  vSetPlan: (en, j) => `${en}，第 ${j} 组：未填计划次数`,
+
+  savedTo: p => `已保存到 ${p} · `,
+  savedAt: '已保存 ',
+  timeLocale: 'zh-CN',
+  conflictNew: p => `相同编号和日期的计划已存在（${p}）。请在上方修改编号或日期——或从列表打开已有文件。`,
+  conflictChanged: '云端文件在打开后已被修改。',
+  btnReload: '从云端重新读取（修改将丢失）',
+},
+
+ru: {
+  selfLabel: 'RU',
+  titleSub: 'ВЕБ-РЕДАКТОР',
+  offline: 'НЕТ СВЯЗИ',
+  exchange: 'ОБМЕН…',
+  linkGeneric: '● СВЯЗЬ',
+  authorizing: 'АВТОРИЗАЦИЯ…',
+  listingRepos: 'СПИСОК РЕПОЗИТОРИЕВ…',
+  checking: 'ПРОВЕРКА…',
+  requestingRepo: 'ЗАПРОС РЕПОЗИТОРИЯ…',
+  reading: (d, n) => `ЧТЕНИЕ ${d}/${n}…`,
+  loadingFile: 'ЗАГРУЗКА ФАЙЛА…',
+  writing: 'ЗАПИСЬ…',
+  deleting: 'УДАЛЕНИЕ…',
+
+  errNoConn: 'нет связи с api.github.com',
+  errToken: 'токен недействителен или истёк — войдите заново',
+  savedTokenBad: 'сохранённый токен не работает: ',
+
+  toastInsertToken: 'вставьте токен',
+  toastNotJson: 'файл не является корректным JSON',
+  toastOpenFail: 'не удалось открыть: ',
+  toastSaved: '✔ СОХРАНЕНО — файл записан в облако',
+  toastSaveFail: 'не сохранено: ',
+  toastDeleted: '✔ УДАЛЕНО — ',
+  toastDelFail: 'не удалено: ',
+
+  tSub: 'веб-редактор',
+  tSignIn: 'вход',
+  tFiles: 'файлы',
+  tNew: 'новая тренировка',
+  tEdit: 'правка',
+
+  hSignIn: 'ВХОД',
+  intro: repo => `Редактор правит файлы тренировок в приватном облачном репозитории
+       <code>${repo}</code>. Браузеру нужен токен GitHub — один раз:
+       он сохранится в этом браузере и будет уходить только на api.github.com.`,
+  steps: repo => [
+    'Нажмите кнопку — откроется страница токенов GitHub.',
+    `<b>Repository access</b> → <i>Only select repositories</i> → выберите
+        <code>${repo}</code>.`,
+    '<b>Permissions → Repository permissions → Contents</b> → ' +
+        '<i>Read and write</i>. Остальное не нужно.',
+    '<b>Generate token</b> — и вставьте строку <code>github_pat_…</code> сюда.',
+  ],
+  btnCreateToken: 'Создать токен ↗',
+  patPlaceholder: 'github_pat_… или классический PAT',
+  btnSignIn: 'Войти',
+  classicTitle: 'Подойдёт и классический PAT',
+  classicBody: 'github.com/settings/tokens/new → отметьте <code>repo</code> → ' +
+        'вставьте в то же поле. Fine-grained лучше: доступ только к одному репозиторию.',
+
+  hRepo: 'РЕПОЗИТОРИЙ ДАННЫХ',
+  repoNotFound: full => `Токен действует, но репозиторий <code>${full}</code>
+    не найден. Укажите, где лежат данные Gym-Boy 3000.`,
+  lblOwnerRepo: 'владелец / репозиторий',
+  btnCheck: 'Проверить',
+
+  publicRepoWarning: 'РЕПОЗИТОРИЙ ПУБЛИЧНЫЙ — данные тренировок видны всему интернету. ' +
+        'Сделайте его приватным: Settings → General → Danger Zone → Change visibility. ' +
+        '(Редактор, как и приложение с v0.10.1, только предупреждает — решение за вами.)',
+
+  kindProgram: 'ПРОГРАММА',
+  kindResult: 'РЕЗУЛЬТАТ',
+  secNewTitle: 'НОВЫЕ ПРОГРАММЫ',
+  secNewHint: 'приложение заберёт их при следующем синке и перенесёт в принятые',
+  secAccTitle: 'ПРИНЯТЫЕ ПРОГРАММЫ',
+  secResTitle: 'РЕЗУЛЬТАТЫ',
+
+  repoLbl: 'репозиторий:',
+  change: 'сменить',
+  signout: 'выйти',
+  confirmExitDirty: 'Есть несохранённые правки — выйти всё равно?',
+  ldelTitle: 'удалить файл из облака (потребует подтверждения)',
+  emptyList: '— пусто',
+
+  btnRetry: 'Повторить',
+  btnNewWorkout: '+ новая тренировка',
+  emptyRepo: 'В репозитории пока нет папок с данными. ' +
+        'Они появятся после первого синка из приложения — или создайте ' +
+        'первую тренировку кнопкой выше.',
+  footerHint: 'файл правится прямо в облаке: приложение подхватит ' +
+        'изменения при следующей синхронизации.',
+
+  minShort: 'мин',
+  exShort: 'упр.',
+
+  backToFiles: '← к файлам',
+  hNewWorkout: 'НОВАЯ ТРЕНИРОВКА',
+  lblBase: 'взять за основу',
+  optScratch: '— с нуля (пустая таблица)',
+  newHint: 'скопируются упражнения, веса и плановые повторения; ' +
+        'факт и пульс очистятся, номер и дата поставятся новые. ' +
+        'Новый файл уйдёт в <code>programs/pending</code> — телефон заберёт его при синке.',
+  btnCreate: 'Создать',
+
+  newProgramTag: 'новая программа → programs/pending',
+  badSchema: s => `неизвестная схема «${s}» — правки могут её исказить`,
+  timesLine: (a, b, dur) => `тренировка: ${a} — ${b}, ${dur}`,
+  lblWorkoutNo: 'тренировка №',
+  lblDate: 'дата',
+  lblNotes: 'заметки',
+  lblPlanNotes: 'план / заметки',
+  btnAddEx: '+ упражнение',
+  btnSave: 'Сохранить в облако',
+  btnCancel: 'Отмена',
+  btnDelete: 'удалить',
+  confirmDelete: 'точно удалить?',
+
+  lblExercise: n => `УПРАЖНЕНИЕ ${n}`,
+  phExName: 'название упражнения',
+  lblBar: 'гриф',
+  unitKg: 'кг',
+  delExTitle: 'убрать упражнение',
+  phExNotes: 'заметки (темп, 1RM, …)',
+  thNo: '№',
+  thPlates: 'блины, кг',
+  thTotal: 'итого, кг',
+  thPlan: 'план',
+  thAct: 'факт',
+  thPulse: 'пульс',
+  delSetTitle: 'убрать подход',
+  btnAddSet: '+ подход',
+  emptyExercises: 'Упражнений нет — добавьте первое кнопкой ниже.',
+  confirmDelEx: name => `Убрать упражнение «${name}»?`,
+  confirmCloseDirty: 'Закрыть без сохранения?',
+  confirmLeaveDirty: 'Есть несохранённые правки — уйти всё равно?',
+
+  vNoNumber: 'не указан номер тренировки',
+  vBadDate: 'дата не указана или не ГГГГ-ММ-ДД',
+  vNoExercises: 'в тренировке нет упражнений',
+  vExPrefix: (i, name) => `упражнение ${i}${name ? ` «${name}»` : ''}`,
+  vNoName: en => `${en}: нет названия`,
+  vNoBar: en => `${en}: не указан вес грифа`,
+  vNoSets: en => `${en}: нет подходов`,
+  vSetPlates: (en, j) => `${en}, подход ${j}: не указан вес блинов`,
+  vSetPlan: (en, j) => `${en}, подход ${j}: не указаны плановые повторения`,
+
+  savedTo: p => `сохранено в ${p} · `,
+  savedAt: 'сохранено ',
+  timeLocale: 'ru-RU',
+  conflictNew: p => `программа с таким номером и датой уже есть
+          (${p}). Поменяйте номер или дату наверху — либо откройте
+          существующий файл из списка.`,
+  conflictChanged: 'файл в облаке изменился с момента открытия.',
+  btnReload: 'Перечитать из облака (правки будут потеряны)',
+},
+
+};
+
+let lang = localStorage.getItem(LS_LANG);
+if (!LANG_ORDER.includes(lang)) lang = 'en';
+let T = STRINGS[lang];
+
+function applyChrome(){
+  document.documentElement.lang = lang;
+  document.getElementById('titlesub').textContent = T.titleSub;
+  document.getElementById('langbtn').textContent = T.selfLabel;
+}
+
+function setLang(id, save = true){
+  if (!STRINGS[id]) return;
+  lang = id;
+  T = STRINGS[id];
+  if (save) localStorage.setItem(LS_LANG, id);
+  applyChrome();
+  if (!inFlight) rerender();
+}
+
+function docTitle(sub){
+  document.title = `Gym-Boy 3000 :: ${T.tSub} — ${sub}`;
+}
 
 const app = document.getElementById('app');
 const statusEl = document.getElementById('status');
@@ -144,6 +600,31 @@ let cur = null;           // открытый файл: { path, sha, data, dirty
 let inFlight = false;     // идёт обмен с облаком (защита от параллельных перечитываний)
 let toastTimer = null;
 
+// Какой экран сейчас показан и что нужно перерисовать при смене языка.
+// renderFiles кеширует последний список (lastSectionsRows) — смена языка
+// перерисовывает его БЕЗ похода в облако.
+let screen = null;
+let lastSectionsRows = null;
+let lastFatal = null;
+let lastAllRows = [];
+
+function rerender(){
+  const name = screen && screen.name;
+  if (name === 'token') showTokenScreen();
+  else if (name === 'repo') showRepoScreen(screen.prefill);
+  else if (name === 'files') {
+    if (lastSectionsRows) renderFiles(lastSectionsRows, lastFatal);
+    else showFiles();
+  }
+  else if (name === 'new') showNewWorkout(lastAllRows);
+  else if (name === 'editor') { if (cur) renderEditor(); }
+}
+
+// Кнопка в шапке: EN → 中文 → RU по кругу, как в приложении.
+document.getElementById('langbtn').onclick = () => {
+  setLang(LANG_ORDER[(LANG_ORDER.indexOf(lang) + 1) % LANG_ORDER.length]);
+};
+
 /* ── утилиты ─────────────────────────────────────────────────────────── */
 
 function esc(s){
@@ -151,10 +632,13 @@ function esc(s){
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
 
-/** '2026-10-25' → '25.10.2026' */
+/** '2026-10-25' → '25.10.2026' (中文: '2026.10.25') */
 function fmtDate(iso){
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
-  return m ? `${m[3]}.${m[2]}.${m[1]}` : (iso ? String(iso) : '—');
+  if (!m) return iso ? String(iso) : '—';
+  return lang === 'zh'
+    ? `${m[1]}.${m[2]}.${m[3]}`
+    : `${m[3]}.${m[2]}.${m[1]}`;
 }
 
 /** Число из ввода: пусто/мусор → null, запятая допустима ('27,5' → 27.5). */
@@ -190,8 +674,8 @@ function setStatus(text, cls){
 }
 
 function busy(on, label){
-  if (on) setStatus('● ' + (label || 'ОБМЕН…'), 'busy');
-  else setStatus(state.owner ? `● ${state.owner}/${state.repo}` : '● СВЯЗЬ', 'ok');
+  if (on) setStatus('● ' + (label || T.exchange), 'busy');
+  else setStatus(state.owner ? `● ${state.owner}/${state.repo}` : T.linkGeneric, 'ok');
 }
 
 function toast(msg, kind){
@@ -226,11 +710,11 @@ async function api(method, path, body){
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch (e) {
-    throw new Error('нет связи с api.github.com');
+    throw new Error(T.errNoConn);
   }
   if (res.status === 401) {
     forgetToken();
-    throw new Error('токен недействителен или истёк — войдите заново');
+    throw new Error(T.errToken);
   }
   let json = null;
   try { json = await res.json(); } catch (e) { /* пустое тело — ок */ }
@@ -250,38 +734,32 @@ function forgetToken(){
 /* ── экран входа (PAT) ───────────────────────────────────────────────── */
 
 function showTokenScreen(msg){
-  document.title = 'Gym-Boy 3000 :: веб-редактор — вход';
-  setStatus('● OFFLINE', '');
+  screen = { name: 'token' };
+  docTitle(T.tSignIn);
+  setStatus('● ' + T.offline, '');
+  const repo = esc(DEFAULT_REPO);
   app.innerHTML = `
-    <h2>ВХОД</h2>
-    <p>Редактор правит файлы тренировок в приватном облачном репозитории
-       <code>${esc(DEFAULT_REPO)}</code>. Браузеру нужен токен GitHub — один раз:
-       он сохранится в этом браузере и будет уходить только на api.github.com.</p>
+    <h2>${T.hSignIn}</h2>
+    <p>${T.intro(repo)}</p>
     ${msg ? `<p class="errbox show">✕ ${esc(msg)}</p>` : ''}
     <div class="panel">
       <ol>
-        <li>Нажмите кнопку — откроется страница токенов GitHub.</li>
-        <li><b>Repository access</b> → <i>Only select repositories</i> → выберите
-            <code>${esc(DEFAULT_REPO)}</code>.</li>
-        <li><b>Permissions → Repository permissions → Contents</b> →
-            <i>Read and write</i>. Остальное не нужно.</li>
-        <li><b>Generate token</b> — и вставьте строку <code>github_pat_…</code> сюда.</li>
+        ${T.steps(repo).map(s => `<li>${s}</li>`).join('')}
       </ol>
       <a class="btn primary" href="https://github.com/settings/personal-access-tokens/new"
-         target="_blank" rel="noopener">Создать токен ↗</a>
+         target="_blank" rel="noopener">${T.btnCreateToken}</a>
       <p><input id="pat" type="password" autocomplete="off" spellcheck="false"
-                placeholder="github_pat_… или классический PAT"></p>
-      <button id="go" class="btn">Войти</button>
-      <details><summary class="dim">Подойдёт и классический PAT</summary>
-        <p class="dim">github.com/settings/tokens/new → отметьте <code>repo</code> →
-        вставьте в то же поле. Fine-grained лучше: доступ только к одному репозиторию.</p>
+                placeholder="${esc(T.patPlaceholder)}"></p>
+      <button id="go" class="btn">${T.btnSignIn}</button>
+      <details><summary class="dim">${T.classicTitle}</summary>
+        <p class="dim">${T.classicBody}</p>
       </details>
     </div>`;
   const go = async () => {
     const t = document.getElementById('pat').value.trim();
-    if (!t) { toast('вставьте токен', 'err'); return; }
+    if (!t) { toast(T.toastInsertToken, 'err'); return; }
     state.token = t;
-    busy(true, 'АВТОРИЗАЦИЯ…');
+    busy(true, T.authorizing);
     try {
       state.login = (await api('GET', '/user')).login;
       localStorage.setItem(LS_TOKEN, t);
@@ -328,7 +806,8 @@ async function tryRepo(full){
 }
 
 async function showRepoScreen(prefill){
-  busy(true, 'СПИСОК РЕПОЗИТОРИЕВ…');
+  screen = { name: 'repo', prefill };
+  busy(true, T.listingRepos);
   let picks = [];
   try {
     picks = (await api('GET', '/user/repos?per_page=100&sort=updated'))
@@ -336,16 +815,15 @@ async function showRepoScreen(prefill){
   } catch (e) { /* без списка — просто ручной ввод */ }
   busy(false);
   app.innerHTML = `
-    <h2>РЕПОЗИТОРИЙ ДАННЫХ</h2>
-    <p class="dim">Токен действует, но репозиторий <code>${esc(state.login)}/${esc(DEFAULT_REPO)}</code>
-    не найден. Укажите, где лежат данные Gym-Boy 3000.</p>
+    <h2>${T.hRepo}</h2>
+    <p class="dim">${T.repoNotFound(esc(state.login) + '/' + esc(DEFAULT_REPO))}</p>
     ${picks.length ? `<p>${picks.map(n =>
       `<button class="btn small pick" data-repo="${esc(n)}">${esc(n)}</button>`).join(' ')}</p>` : ''}
     <div class="panel">
-      <label><span class="lbl">владелец / репозиторий</span>
+      <label><span class="lbl">${T.lblOwnerRepo}</span>
         <input id="rfull" placeholder="${esc(state.login)}/${esc(DEFAULT_REPO)}"
                value="${esc(prefill || '')}"></label>
-      <button id="rgo" class="btn">Проверить</button>
+      <button id="rgo" class="btn">${T.btnCheck}</button>
     </div>`;
   app.querySelectorAll('.pick').forEach(b => { b.onclick = () => useRepo(b.dataset.repo); });
   const go = () => useRepo(document.getElementById('rfull').value.trim());
@@ -354,7 +832,7 @@ async function showRepoScreen(prefill){
 }
 
 async function useRepo(full){
-  busy(true, 'ПРОВЕРКА…');
+  busy(true, T.checking);
   const ok = await tryRepo(full);
   busy(false);
   if (ok) showFiles();
@@ -363,26 +841,41 @@ async function useRepo(full){
 
 function publicWarn(){
   return state.isPrivate === false
-    ? `<div class="warn">⚠ РЕПОЗИТОРИЙ ПУБЛИЧНЫЙ — данные тренировок видны всему интернету.
-       Сделайте его приватным: Settings → General → Danger Zone → Change visibility.
-       (Редактор, как и приложение с v0.10.1, только предупреждает — решение за вами.)</div>`
+    ? `<div class="warn">⚠ ${T.publicRepoWarning}</div>`
     : '';
 }
 
 /* ── список файлов ───────────────────────────────────────────────────── */
 
+/* Названия секций и метки записей берутся из STRINGS при отрисовке
+   (sectionInfo), чтобы смена языка обновляла уже показанный список. */
 const SECTIONS = [
-  { dir: 'programs/pending',  kind: 'ПРОГРАММА', title: 'НОВЫЕ ПРОГРАММЫ',
-    hint: 'приложение заберёт их при следующем синке и перенесёт в принятые' },
-  { dir: 'programs/imported', kind: 'ПРОГРАММА', title: 'ПРИНЯТЫЕ ПРОГРАММЫ', hint: '' },
-  { dir: 'results',           kind: 'РЕЗУЛЬТАТ', title: 'РЕЗУЛЬТАТЫ', hint: '' },
+  { dir: 'programs/pending' },
+  { dir: 'programs/imported' },
+  { dir: 'results' },
 ];
+
+function sectionInfo(dir){
+  if (dir === 'programs/pending')
+    return { kind: T.kindProgram, title: T.secNewTitle, hint: T.secNewHint };
+  if (dir === 'programs/imported')
+    return { kind: T.kindProgram, title: T.secAccTitle, hint: '' };
+  return { kind: T.kindResult, title: T.secResTitle, hint: '' };
+}
+
+function isResultPath(p){
+  return String(p).startsWith('results/');
+}
+
+function kindFor(p){
+  return isResultPath(p) ? T.kindResult : T.kindProgram;
+}
 
 function commonHead(){
   return `
-    <p class="faint">репозиторий: ${esc(state.owner)}/${esc(state.repo)}
-      · <a href="#" id="chg">сменить</a>
-      · <a href="#" id="out">выйти</a></p>
+    <p class="faint">${T.repoLbl} ${esc(state.owner)}/${esc(state.repo)}
+      · <a href="#" id="chg">${T.change}</a>
+      · <a href="#" id="out">${T.signout}</a></p>
     ${publicWarn()}`;
 }
 
@@ -390,7 +883,7 @@ function bindCommonHead(){
   document.getElementById('chg').onclick = e => { e.preventDefault(); showRepoScreen(); };
   document.getElementById('out').onclick = e => {
     e.preventDefault();
-    if (cur && cur.dirty && !confirm('Есть несохранённые правки — выйти всё равно?')) return;
+    if (cur && cur.dirty && !confirm(T.confirmExitDirty)) return;
     forgetToken();
     showTokenScreen();
   };
@@ -417,26 +910,27 @@ function entryParts(m, kind, isResult){
   const num = m.workout_number != null ? ` ${m.workout_number}` : '';
   const date = m.date ? ` · ${fmtDate(m.date)}` : '';
   const extra = isResult && m.duration_seconds != null
-    ? ` · ${Math.round(m.duration_seconds / 60)} мин` : '';
-  const exn = Array.isArray(m.exercises) ? ` · ${m.exercises.length} упр.` : '';
+    ? ` · ${Math.round(m.duration_seconds / 60)} ${T.minShort}` : '';
+  const exn = Array.isArray(m.exercises) ? ` · ${m.exercises.length} ${T.exShort}` : '';
   const note = m.notes ? ` — ${String(m.notes).slice(0, 60)}` : '';
   return { head: `${kind}${num}`, rest: `${date}${extra}${exn}${note}` };
 }
 
 function sectionHtml(sec, rows){
+  const info = sectionInfo(sec.dir);
   const isResult = sec.dir === 'results';
   const items = rows.map(r => {
-    const p = entryParts(r.meta, sec.kind, isResult);
+    const p = entryParts(r.meta, info.kind, isResult);
     return `<li data-path="${esc(r.path)}">
       <div class="frow"><span class="fkind">${esc(p.head)}</span>
         <span>${esc(p.rest)}</span>
         <button class="btn small danger ldel" data-sha="${esc(r.sha || '')}"
-          title="удалить файл из облака (потребует подтверждения)">✕</button></div></li>`;
+          title="${esc(T.ldelTitle)}">✕</button></div></li>`;
   }).join('');
-  return `<h2>${sec.title}</h2>
-    ${sec.hint ? `<p class="sec-hint">${sec.hint}</p>` : ''}
+  return `<h2>${info.title}</h2>
+    ${info.hint ? `<p class="sec-hint">${info.hint}</p>` : ''}
     ${items ? `<ul class="filelist">${items}</ul>`
-            : `<p class="faint">— пусто</p>`}`;
+            : `<p class="faint">${T.emptyList}</p>`}`;
 }
 
 /*
@@ -461,8 +955,8 @@ async function fetchRows(sec, files){
       } catch (e) {
         meta = metaFromName(f.name);
       }
-      rows.push({ name: f.name, path: f.path, meta, kind: sec.kind, sha });
-      busy(true, `ЧТЕНИЕ ${++done}/${files.length}…`);
+      rows.push({ name: f.name, path: f.path, meta, sha });
+      busy(true, T.reading(++done, files.length));
     }
   }));
   rows.sort(byWorkout);
@@ -475,8 +969,8 @@ async function showFiles(opts){
   inFlight = true;
   try {
     cur = null;
-    document.title = 'Gym-Boy 3000 :: веб-редактор — файлы';
-    if (!quiet) busy(true, 'ЗАПРОС РЕПОЗИТОРИЯ…');
+    docTitle(T.tFiles);
+    if (!quiet) busy(true, T.requestingRepo);
     const sectionsRows = [];
     let fatal = null;
     // Сначала корень репозитория: узнаём, какие папки вообще есть, и не
@@ -523,7 +1017,7 @@ async function showFiles(opts){
       } catch (e) {
         // список важнее точных меток: упало чтение содержимого — показать хотя бы имена
         rows = files.map(f => ({ name: f.name, path: f.path,
-          meta: metaFromName(f.name), kind: sec.kind, sha: f.sha }));
+          meta: metaFromName(f.name), sha: f.sha }));
       }
       sectionsRows.push({ sec, rows });
     }
@@ -536,18 +1030,18 @@ async function showFiles(opts){
 }
 
 function renderFiles(sectionsRows, fatal){
+  screen = { name: 'files' };
+  lastSectionsRows = sectionsRows;
+  lastFatal = fatal || null;
   const allRows = sectionsRows.flatMap(s => s.rows);
-  document.title = 'Gym-Boy 3000 :: веб-редактор — файлы';
+  docTitle(T.tFiles);
   app.innerHTML = commonHead() + (fatal
     ? `<div class="errbox show">✕ ${esc(fatal.message)}
-         <br><button class="btn small" id="retry">Повторить</button></div>`
-    : `<p><button id="neww" class="btn primary">+ новая тренировка</button></p>`
+         <br><button class="btn small" id="retry">${T.btnRetry}</button></div>`
+    : `<p><button id="neww" class="btn primary">${T.btnNewWorkout}</button></p>`
       + (sectionsRows.map(({sec, rows}) => sectionHtml(sec, rows)).join('')
-         || `<p class="dim">В репозитории пока нет папок с данными.
-              Они появятся после первого синка из приложения — или создайте
-              первую тренировку кнопкой выше.</p>`)
-  ) + `<p class="faint">файл правится прямо в облаке: приложение подхватит
-      изменения при следующей синхронизации.</p>`;
+         || `<p class="dim">${T.emptyRepo}</p>`)
+  ) + `<p class="faint">${T.footerHint}</p>`;
   bindCommonHead();
   const retry = document.getElementById('retry');
   if (retry) retry.onclick = showFiles;
@@ -597,24 +1091,24 @@ function startNewProgram(base, allRows){
 }
 
 function showNewWorkout(allRows){
-  document.title = 'Gym-Boy 3000 :: веб-редактор — новая тренировка';
+  screen = { name: 'new' };
+  lastAllRows = allRows;
+  docTitle(T.tNew);
   const options = allRows.map((r, i) => {
-    const p = entryParts(r.meta, r.kind, String(r.kind).includes('РЕЗУЛЬТАТ'));
+    const p = entryParts(r.meta, kindFor(r.path), isResultPath(r.path));
     return `<option value="${i}">${esc(p.head + p.rest)}</option>`;
   }).join('');
   app.innerHTML = commonHead() + `
-    <p><a href="#" id="back">← к файлам</a></p>
-    <h2>НОВАЯ ТРЕНИРОВКА</h2>
+    <p><a href="#" id="back">${T.backToFiles}</a></p>
+    <h2>${T.hNewWorkout}</h2>
     <div class="panel">
-      <label><span class="lbl">взять за основу</span>
+      <label><span class="lbl">${T.lblBase}</span>
         <select id="base">
-          <option value="-1">— с нуля (пустая таблица)</option>
+          <option value="-1">${T.optScratch}</option>
           ${options}
         </select></label>
-      <p class="faint">скопируются упражнения, веса и плановые повторения;
-      факт и пульс очистятся, номер и дата поставятся новые.
-      Новый файл уйдёт в <code>programs/pending</code> — телефон заберёт его при синке.</p>
-      <button id="create" class="btn primary">Создать</button>
+      <p class="faint">${T.newHint}</p>
+      <button id="create" class="btn primary">${T.btnCreate}</button>
     </div>`;
   bindCommonHead();
   document.getElementById('back').onclick = e => { e.preventDefault(); showFiles(); };
@@ -637,14 +1131,14 @@ function newExercise(bar){
 }
 
 async function openEditor(path){
-  busy(true, 'ЗАГРУЗКА ФАЙЛА…');
+  busy(true, T.loadingFile);
   try {
     const f = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${path}`);
     let data;
     try { data = JSON.parse(b64decode(f.content)); }
     catch (e) {
       busy(false);
-      toast('файл не является корректным JSON', 'err');
+      toast(T.toastNotJson, 'err');
       return;
     }
     data.exercises = Array.isArray(data.exercises) ? data.exercises : [];
@@ -652,43 +1146,45 @@ async function openEditor(path){
     cur = { path, sha: f.sha, data, dirty: false };
     renderEditor();
   } catch (e) {
-    toast('не удалось открыть: ' + e.message, 'err');
+    toast(T.toastOpenFail + e.message, 'err');
   }
   busy(false);
 }
 
 function renderEditor(){
-  document.title = 'Gym-Boy 3000 :: веб-редактор — правка';
+  screen = { name: 'editor' };
+  docTitle(T.tEdit);
   const d = cur.data;
   const isResult = String(d.schema || '').includes('result');
   const badSchema = d.schema && !String(d.schema).startsWith('gymboy-');
+  const dur = d.duration_seconds != null
+    ? Math.round(d.duration_seconds / 60) + ' ' + T.minShort : '';
   const times = (d.started_at || d.finished_at)
-    ? `<p class="faint">тренировка: ${esc(fmtDate(d.started_at))} — ${esc(d.finished_at || '')},
-         ${esc(d.duration_seconds != null ? Math.round(d.duration_seconds / 60) + ' мин' : '')}</p>`
+    ? `<p class="faint">${T.timesLine(esc(fmtDate(d.started_at)), esc(d.finished_at || ''), esc(dur))}</p>`
     : '';
   app.innerHTML = `
-    <p><a href="#" id="back">← к файлам</a>
-       <span class="faint"> · ${cur.isNew ? 'новая программа → programs/pending' : esc(cur.path)}</span></p>
+    <p><a href="#" id="back">${T.backToFiles}</a>
+       <span class="faint"> · ${cur.isNew ? T.newProgramTag : esc(cur.path)}</span></p>
     ${publicWarn()}
-    ${badSchema ? `<div class="warn">⚠ неизвестная схема «${esc(d.schema)}» — правки могут её исказить</div>` : ''}
+    ${badSchema ? `<div class="warn">⚠ ${T.badSchema(esc(d.schema))}</div>` : ''}
     ${times}
     <div class="panel">
       <div class="rowflex">
-        <label><span class="lbl">тренировка №</span>
+        <label><span class="lbl">${T.lblWorkoutNo}</span>
           <input id="wnum" type="number" inputmode="numeric" value="${esc(d.workout_number ?? '')}"></label>
-        <label><span class="lbl">дата</span>
+        <label><span class="lbl">${T.lblDate}</span>
           <input id="wdate" type="date" value="${esc(d.date || '')}"></label>
       </div>
-      <label><span class="lbl">${isResult ? 'заметки' : 'план / заметки'}</span>
+      <label><span class="lbl">${isResult ? T.lblNotes : T.lblPlanNotes}</span>
         <textarea id="wnotes" rows="2">${esc(d.notes || '')}</textarea></label>
     </div>
     <div id="exercises"></div>
-    <button id="addex" class="btn">+ упражнение</button>
+    <button id="addex" class="btn">${T.btnAddEx}</button>
     <div class="errbox" id="errbox"></div>
     <div class="savebar">
-      <button id="save" class="btn primary">Сохранить в облако</button>
-      <button id="cancel" class="btn">Отмена</button>
-      ${cur.isNew ? '' : `<button id="del" class="btn danger" title="удалить файл из облака (потребует подтверждения)">удалить</button>`}
+      <button id="save" class="btn primary">${T.btnSave}</button>
+      <button id="cancel" class="btn">${T.btnCancel}</button>
+      ${cur.isNew ? '' : `<button id="del" class="btn danger" title="${esc(T.ldelTitle)}">${T.btnDelete}</button>`}
       <span class="faint" id="savehint"></span>
     </div>`;
   document.getElementById('wnum').oninput = e => { d.workout_number = parseNum(e.target.value); markDirty(); };
@@ -704,12 +1200,12 @@ function renderEditor(){
   const del = document.getElementById('del');
   if (del) del.onclick = deleteFile;
   document.getElementById('cancel').onclick = () => {
-    if (cur.dirty && !confirm('Закрыть без сохранения?')) return;
+    if (cur.dirty && !confirm(T.confirmCloseDirty)) return;
     showFiles();
   };
   document.getElementById('back').onclick = e => {
     e.preventDefault();
-    if (cur.dirty && !confirm('Есть несохранённые правки — уйти всё равно?')) return;
+    if (cur.dirty && !confirm(T.confirmLeaveDirty)) return;
     showFiles();
   };
   renderExercises();
@@ -727,23 +1223,23 @@ function exerciseHtml(ex, i){
       <td><input class="s-plan" inputmode="numeric" value="${esc(s.planned_reps ?? '')}"></td>
       <td><input class="s-act" inputmode="numeric" value="${esc(s.actual_reps ?? '')}"></td>
       <td><input class="s-pulse" inputmode="numeric" value="${esc(s.pulse ?? '')}"></td>
-      <td class="act"><button class="btn small danger s-del" title="убрать подход">✕</button></td>
+      <td class="act"><button class="btn small danger s-del" title="${esc(T.delSetTitle)}">✕</button></td>
     </tr>`;
   }).join('');
   return `<div class="card" data-ex="${i}">
     <div class="cardhead">
-      <b>УПРАЖНЕНИЕ ${i + 1}</b>
-      <input class="exname" value="${esc(ex.name || '')}" placeholder="название упражнения">
-      <span class="barw"><span>гриф</span>
-        <input class="exbar" inputmode="decimal" value="${esc(ex.bar_weight_kg ?? '')}"><span>кг</span></span>
-      <button class="btn small danger del" title="убрать упражнение">✕</button>
+      <b>${T.lblExercise(i + 1)}</b>
+      <input class="exname" value="${esc(ex.name || '')}" placeholder="${esc(T.phExName)}">
+      <span class="barw"><span>${T.lblBar}</span>
+        <input class="exbar" inputmode="decimal" value="${esc(ex.bar_weight_kg ?? '')}"><span>${T.unitKg}</span></span>
+      <button class="btn small danger del" title="${esc(T.delExTitle)}">✕</button>
     </div>
-    <input class="exnotes" value="${esc(ex.notes || '')}" placeholder="заметки (темп, 1RM, …)">
+    <input class="exnotes" value="${esc(ex.notes || '')}" placeholder="${esc(T.phExNotes)}">
     <div class="tbl-scroll"><table>
-      <thead><tr><th>№</th><th>блины, кг</th><th>итого, кг</th><th>план</th><th>факт</th><th>пульс</th><th></th></tr></thead>
+      <thead><tr><th>${T.thNo}</th><th>${T.thPlates}</th><th>${T.thTotal}</th><th>${T.thPlan}</th><th>${T.thAct}</th><th>${T.thPulse}</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
-    <button class="btn small addset">+ подход</button>
+    <button class="btn small addset">${T.btnAddSet}</button>
   </div>`;
 }
 
@@ -751,14 +1247,14 @@ function renderExercises(){
   const box = document.getElementById('exercises');
   const exs = cur.data.exercises;
   box.innerHTML = exs.map(exerciseHtml).join('') ||
-    `<p class="dim">Упражнений нет — добавьте первое кнопкой ниже.</p>`;
+    `<p class="dim">${T.emptyExercises}</p>`;
   exs.forEach((ex, i) => {
     const card = box.querySelector(`[data-ex="${i}"]`);
     card.querySelector('.exname').oninput = e => { ex.name = e.target.value; markDirty(); };
     card.querySelector('.exbar').oninput = e => { ex.bar_weight_kg = parseNum(e.target.value); markDirty(); updateTotals(i); };
     card.querySelector('.exnotes').oninput = e => { ex.notes = e.target.value; markDirty(); };
     card.querySelector('.del').onclick = () => {
-      if (!confirm(`Убрать упражнение «${ex.name || i + 1}»?`)) return;
+      if (!confirm(T.confirmDelEx(ex.name || i + 1))) return;
       cur.data.exercises.splice(i, 1);
       markDirty();
       renderEditor();
@@ -808,17 +1304,17 @@ function updateTotals(i){
 function validate(){
   const errs = [];
   const d = cur.data;
-  if (d.workout_number == null) errs.push('не указан номер тренировки');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date || '')) errs.push('дата не указана или не ГГГГ-ММ-ДД');
-  if (!d.exercises.length) errs.push('в тренировке нет упражнений');
+  if (d.workout_number == null) errs.push(T.vNoNumber);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date || '')) errs.push(T.vBadDate);
+  if (!d.exercises.length) errs.push(T.vNoExercises);
   d.exercises.forEach((ex, i) => {
-    const en = `упражнение ${i + 1}${ex.name ? ` «${ex.name}»` : ''}`;
-    if (!String(ex.name || '').trim()) errs.push(`${en}: нет названия`);
-    if (parseNum(ex.bar_weight_kg) == null) errs.push(`${en}: не указан вес грифа`);
-    if (!ex.sets.length) errs.push(`${en}: нет подходов`);
+    const en = T.vExPrefix(i + 1, String(ex.name || '').trim());
+    if (!String(ex.name || '').trim()) errs.push(T.vNoName(en));
+    if (parseNum(ex.bar_weight_kg) == null) errs.push(T.vNoBar(en));
+    if (!ex.sets.length) errs.push(T.vNoSets(en));
     ex.sets.forEach((s, j) => {
-      if (parseNum(s.plates_weight_kg) == null) errs.push(`${en}, подход ${j + 1}: не указан вес блинов`);
-      if (s.planned_reps == null) errs.push(`${en}, подход ${j + 1}: не указаны плановые повторения`);
+      if (parseNum(s.plates_weight_kg) == null) errs.push(T.vSetPlates(en, j + 1));
+      if (s.planned_reps == null) errs.push(T.vSetPlan(en, j + 1));
     });
   });
   return errs;
@@ -856,7 +1352,7 @@ async function saveFile(){
     // имя нового файла строится из актуальных номера и даты
     cur.path = `programs/pending/program-${cur.data.workout_number}-${cur.data.date}.json`;
   }
-  busy(true, 'ЗАПИСЬ…');
+  busy(true, T.writing);
   try {
     const res = await api('PUT',
       `/repos/${state.owner}/${state.repo}/contents/${cur.path}`, {
@@ -871,24 +1367,22 @@ async function saveFile(){
     cur.isNew = false;
     cur.dirty = false;
     document.getElementById('savehint').textContent =
-      (wasNew ? `сохранено в ${cur.path} · ` : 'сохранено ') +
-      new Date().toLocaleTimeString('ru-RU');
-    toast('✔ СОХРАНЕНО — файл записан в облако');
+      (wasNew ? T.savedTo(cur.path) : T.savedAt) +
+      new Date().toLocaleTimeString(T.timeLocale);
+    toast(T.toastSaved);
   } catch (e) {
     if (e.status === 409 || (e.status === 422 && /sha/i.test(e.message))) {
       if (cur.isNew) {
-        box.innerHTML = `<div>⚠ программа с таким номером и датой уже есть
-          (${esc(cur.path)}). Поменяйте номер или дату наверху — либо откройте
-          существующий файл из списка.</div>`;
+        box.innerHTML = `<div>⚠ ${T.conflictNew(esc(cur.path))}</div>`;
         box.classList.add('show');
       } else {
-        box.innerHTML = `<div>⚠ файл в облаке изменился с момента открытия.</div>
-          <button class="btn small" id="reload">Перечитать из облака (правки будут потеряны)</button>`;
+        box.innerHTML = `<div>⚠ ${T.conflictChanged}</div>
+          <button class="btn small" id="reload">${T.btnReload}</button>`;
         box.classList.add('show');
         document.getElementById('reload').onclick = () => openEditor(cur.path);
       }
     } else {
-      toast('не сохранено: ' + e.message, 'err');
+      toast(T.toastSaveFail + e.message, 'err');
     }
   }
   saveBtn.disabled = false;
@@ -932,30 +1426,30 @@ async function deleteFile(){
   if (!btn || cur.isNew) return;
   if (!btn.dataset.armed) {
     btn.dataset.armed = '1';
-    btn.textContent = 'точно удалить?';
+    btn.textContent = T.confirmDelete;
     setTimeout(() => {
       if (!btn.isConnected || !btn.dataset.armed) return;
       delete btn.dataset.armed;
-      btn.textContent = 'удалить';
+      btn.textContent = T.btnDelete;
     }, 6000);
     return;
   }
   btn.disabled = true;
-  busy(true, 'УДАЛЕНИЕ…');
+  busy(true, T.deleting);
   try {
     inFlight = true;
     try { await deleteByPath(cur.path, cur.sha); }
     finally { inFlight = false; }
     busy(false);
-    toast('✔ УДАЛЕНО — ' + cur.path);
+    toast(T.toastDeleted + cur.path);
     cur = null;
     await showFiles();
   } catch (e) {
     busy(false);
     btn.disabled = false;
     delete btn.dataset.armed;
-    btn.textContent = 'удалить';
-    toast('не удалено: ' + e.message, 'err');
+    btn.textContent = T.btnDelete;
+    toast(T.toastDelFail + e.message, 'err');
   }
 }
 
@@ -966,7 +1460,7 @@ async function listDelete(btn){
   if (!path) return;
   if (!btn.dataset.armed) {
     btn.dataset.armed = '1';
-    btn.textContent = 'точно удалить?';
+    btn.textContent = T.confirmDelete;
     setTimeout(() => {
       if (!btn.isConnected || !btn.dataset.armed) return;
       delete btn.dataset.armed;
@@ -975,20 +1469,20 @@ async function listDelete(btn){
     return;
   }
   btn.disabled = true;
-  busy(true, 'УДАЛЕНИЕ…');
+  busy(true, T.deleting);
   try {
     inFlight = true;
     try { await deleteByPath(path, btn.dataset.sha || ''); }
     finally { inFlight = false; }
     busy(false);
-    toast('✔ УДАЛЕНО — ' + path);
+    toast(T.toastDeleted + path);
     await showFiles();
   } catch (e) {
     busy(false);
     btn.disabled = false;
     delete btn.dataset.armed;
     btn.textContent = '✕';
-    toast('не удалено: ' + e.message, 'err');
+    toast(T.toastDelFail + e.message, 'err');
   }
 }
 
@@ -1001,6 +1495,8 @@ window.addEventListener('beforeunload', e => {
 window.__gb3000 = {
   state,
   ver: APP_VER,
+  lang: () => lang,
+  setLang: id => setLang(id),
   open(obj, path, sha){
     cur = { path: path || 'test/sample.json', sha: sha || 'test',
             data: JSON.parse(JSON.stringify(obj)), dirty: false };
@@ -1020,7 +1516,6 @@ window.__gb3000 = {
     const sectionsRows = SECTIONS.map(sec => ({
       sec,
       rows: rows.filter(r => String(r.path).startsWith(sec.dir + '/'))
-               .map(r => ({ ...r, kind: sec.kind }))
                .sort(byWorkout),
     }));
     renderFiles(sectionsRows, null);
@@ -1063,15 +1558,16 @@ setInterval(() => {
 })();
 
 (async function boot(){
+  applyChrome();
   const t = localStorage.getItem(LS_TOKEN);
   if (!t) return showTokenScreen();
   state.token = t;
-  busy(true, 'АВТОРИЗАЦИЯ…');
+  busy(true, T.authorizing);
   try {
     state.login = (await api('GET', '/user')).login;
   } catch (e) {
     busy(false);
-    return showTokenScreen('сохранённый токен не работает: ' + e.message);
+    return showTokenScreen(T.savedTokenBad + e.message);
   }
   busy(false);
   await pickRepo();
