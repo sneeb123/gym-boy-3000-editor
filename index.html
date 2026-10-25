@@ -130,6 +130,10 @@ ol li{margin:4px 0}
 const DEFAULT_REPO = 'gymboy-data';
 const LS_TOKEN = 'gb3000_web.token';
 const LS_REPO  = 'gb3000_web.repo';
+// Меняется при каждой публикации. Открытая вчера вкладка живёт со старым кодом
+// и ничего о нём не знает — поэтому при загрузке она сверяет APP_VER с живой
+// страницей (см. versionCheck перед boot) и перезагружается при расхождении.
+const APP_VER = 'v5';
 
 const app = document.getElementById('app');
 const statusEl = document.getElementById('status');
@@ -460,13 +464,14 @@ async function fetchRows(sec, files){
   return rows;
 }
 
-async function showFiles(){
+async function showFiles(opts){
+  const quiet = !!(opts && opts.quiet); // фоновая сверка: молча, не трогая экран
   if (inFlight) return;
   inFlight = true;
   try {
     cur = null;
     document.title = 'Gym-Boy 3000 :: веб-редактор — файлы';
-    busy(true, 'ЗАПРОС РЕПОЗИТОРИЯ…');
+    if (!quiet) busy(true, 'ЗАПРОС РЕПОЗИТОРИЯ…');
     const sectionsRows = [];
     let fatal = null;
     // Сначала корень репозитория: узнаём, какие папки вообще есть, и не
@@ -478,7 +483,7 @@ async function showFiles(){
       const root = await api('GET', `/repos/${state.owner}/${state.repo}/contents/`);
       rootNames = new Set((Array.isArray(root) ? root : []).map(x => x.name));
     } catch (e) {
-      if (e.status !== 404) { busy(false); renderFiles([], e); return; }
+      if (e.status !== 404) { busy(false); if (!quiet) renderFiles([], e); return; }
       rootNames = new Set();               // репозиторий ещё пустой
     }
     const parentNames = {};
@@ -518,7 +523,8 @@ async function showFiles(){
       sectionsRows.push({ sec, rows });
     }
     busy(false);
-    renderFiles(sectionsRows, fatal);
+    // при тихой сверке ошибки сети не должны стирать текущий список
+    if (!(fatal && quiet)) renderFiles(sectionsRows, fatal);
   } finally {
     inFlight = false;
   }
@@ -884,17 +890,35 @@ async function saveFile(){
   busy(false);
 }
 
-/* Общее ядро удаления: без sha — сначала читаем файл ради актуального sha. */
+/* Общее ядро удаления: без sha — сначала читаем файл ради актуального sha.
+   404 не ошибка: файл мог уже исчезнуть (удалён из другой вкладки или с
+   телефона, а у нас устаревший список) — считаем «уже удалено» и успешно
+   перечитываем список, чтобы строка-призрак исчезла. 409 — файл пересоздавали
+   (устаревший sha из списка): перечитываем sha и пробуем ещё раз, как в приложении. */
 async function deleteByPath(path, sha){
-  let s = sha;
-  if (!s) {
-    const f = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${path}`);
-    s = f.sha;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let s = sha;
+    if (!s) {
+      try {
+        const f = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${path}`);
+        s = f.sha;
+      } catch (e) {
+        if (e.status === 404) return;
+        throw e;
+      }
+    }
+    try {
+      await api('DELETE', `/repos/${state.owner}/${state.repo}/contents/${path}`, {
+        message: `Gym-Boy 3000: удаление — ${path.split('/').pop()}`,
+        sha: s,
+      });
+      return;
+    } catch (e) {
+      if (e.status === 404) return;   // удалили раньше нас — цель достигнута
+      if (e.status === 409 && attempt === 0) { sha = null; continue; }
+      throw e;
+    }
   }
-  await api('DELETE', `/repos/${state.owner}/${state.repo}/contents/${path}`, {
-    message: `Gym-Boy 3000: удаление — ${path.split('/').pop()}`,
-    sha: s,
-  });
 }
 
 /* Удаление записи: первый клик — предупреждение, второй (в течение 6 с) — удаление. */
@@ -971,6 +995,7 @@ window.addEventListener('beforeunload', e => {
 
 window.__gb3000 = {
   state,
+  ver: APP_VER,
   open(obj, path, sha){
     cur = { path: path || 'test/sample.json', sha: sha || 'test',
             data: JSON.parse(JSON.stringify(obj)), dirty: false };
@@ -1005,6 +1030,29 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && state.token && state.owner &&
       !cur && !inFlight) showFiles();
 });
+
+// Пока открыт экран файлов, облако может измениться без нас (телефон, другая
+// вкладка) — раз в минуту тихо перечитываем список. Тот же набор защит, что и
+// у перечитывания при возврате на вкладку: не редактируем, не ждёт обмен.
+setInterval(() => {
+  if (document.visibilityState === 'visible' && state.token && state.owner &&
+      !cur && !inFlight) showFiles({ quiet: true });
+}, 60000);
+
+/* Свежесть бандла: вкладка, открытая до публикации, продолжает работать со
+   старым кодом и показывает устаревшее поведение. При каждой загрузке тихо
+   сверяем свою версию с живой страницей; не совпала — один раз перезагружаемся
+   (флаг в sessionStorage защищает от цикла, если живая версия тоже устареет). */
+(async function versionCheck(){
+  try {
+    const r = await fetch(location.pathname + '?vchk=' + Date.now(), { cache: 'no-store' });
+    const m = (await r.text()).match(/APP_VER = '([^']+)'/);
+    if (m && m[1] !== APP_VER && sessionStorage.getItem('gb3000_reloaded') !== m[1]) {
+      sessionStorage.setItem('gb3000_reloaded', m[1]);
+      location.reload();
+    }
+  } catch (e) { /* нет связи — работаем как есть */ }
+})();
 
 (async function boot(){
   const t = localStorage.getItem(LS_TOKEN);
