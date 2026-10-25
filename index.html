@@ -97,6 +97,7 @@ td.act{width:34px; text-align:center}
 .filelist .frow{padding:9px 12px; display:flex; gap:12px; align-items:baseline; flex-wrap:wrap}
 .filelist .fkind{color:var(--accent); letter-spacing:.06em}
 .filelist .fmeta{color:var(--dim); font-size:13px}
+.filelist .ldel{margin-left:auto; align-self:center}
 .sec-hint{color:var(--faint); font-size:12px; margin:14px 0 0; letter-spacing:.05em}
 ol{margin:8px 0 14px; padding-left:22px}
 ol li{margin:4px 0}
@@ -418,7 +419,9 @@ function sectionHtml(sec, rows){
     const p = entryParts(r.meta, sec.kind, isResult);
     return `<li data-path="${esc(r.path)}">
       <div class="frow"><span class="fkind">${esc(p.head)}</span>
-        <span>${esc(p.rest)}</span></div></li>`;
+        <span>${esc(p.rest)}</span>
+        <button class="btn small danger ldel" data-sha="${esc(r.sha || '')}"
+          title="удалить файл из облака (потребует подтверждения)">✕</button></div></li>`;
   }).join('');
   return `<h2>${sec.title}</h2>
     ${sec.hint ? `<p class="sec-hint">${sec.hint}</p>` : ''}
@@ -446,7 +449,7 @@ async function fetchRows(sec, files){
       } catch (e) {
         meta = metaFromName(f.name);
       }
-      rows.push({ name: f.name, path: f.path, meta, kind: sec.kind });
+      rows.push({ name: f.name, path: f.path, meta, kind: sec.kind, sha: full.sha });
       busy(true, `ЧТЕНИЕ ${++done}/${files.length}…`);
     }
   }));
@@ -496,6 +499,9 @@ function renderFiles(sectionsRows, fatal){
   if (neww) neww.onclick = () => showNewWorkout(allRows);
   app.querySelectorAll('li[data-path]').forEach(li => {
     li.onclick = () => openEditor(li.dataset.path);
+  });
+  app.querySelectorAll('.ldel').forEach(b => {
+    b.onclick = e => { e.stopPropagation(); listDelete(b); };
   });
 }
 
@@ -829,6 +835,19 @@ async function saveFile(){
   busy(false);
 }
 
+/* Общее ядро удаления: без sha — сначала читаем файл ради актуального sha. */
+async function deleteByPath(path, sha){
+  let s = sha;
+  if (!s) {
+    const f = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${path}`);
+    s = f.sha;
+  }
+  await api('DELETE', `/repos/${state.owner}/${state.repo}/contents/${path}`, {
+    message: `Gym-Boy 3000: удаление — ${path.split('/').pop()}`,
+    sha: s,
+  });
+}
+
 /* Удаление записи: первый клик — предупреждение, второй (в течение 6 с) — удаление. */
 async function deleteFile(){
   const btn = document.getElementById('del');
@@ -846,10 +865,7 @@ async function deleteFile(){
   btn.disabled = true;
   busy(true, 'УДАЛЕНИЕ…');
   try {
-    await api('DELETE', `/repos/${state.owner}/${state.repo}/contents/${cur.path}`, {
-      message: `Gym-Boy 3000: удаление — ${cur.path.split('/').pop()}`,
-      sha: cur.sha,
-    });
+    await deleteByPath(cur.path, cur.sha);
     busy(false);
     toast('✔ УДАЛЕНО — ' + cur.path);
     cur = null;
@@ -859,6 +875,37 @@ async function deleteFile(){
     btn.disabled = false;
     delete btn.dataset.armed;
     btn.textContent = 'удалить';
+    toast('не удалено: ' + e.message, 'err');
+  }
+}
+
+/* Крестик в списке: та же двухшаговая логика, что и в редакторе. */
+async function listDelete(btn){
+  const li = btn.closest('li[data-path]');
+  const path = li && li.dataset.path;
+  if (!path) return;
+  if (!btn.dataset.armed) {
+    btn.dataset.armed = '1';
+    btn.textContent = 'точно удалить?';
+    setTimeout(() => {
+      if (!btn.isConnected || !btn.dataset.armed) return;
+      delete btn.dataset.armed;
+      btn.textContent = '✕';
+    }, 6000);
+    return;
+  }
+  btn.disabled = true;
+  busy(true, 'УДАЛЕНИЕ…');
+  try {
+    await deleteByPath(path, btn.dataset.sha || '');
+    busy(false);
+    toast('✔ УДАЛЕНО — ' + path);
+    await showFiles();
+  } catch (e) {
+    busy(false);
+    btn.disabled = false;
+    delete btn.dataset.armed;
+    btn.textContent = '✕';
     toast('не удалено: ' + e.message, 'err');
   }
 }
