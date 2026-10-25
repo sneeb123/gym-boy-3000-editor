@@ -443,13 +443,15 @@ async function fetchRows(sec, files){
     while (queue.length) {
       const f = queue.shift();
       let meta = null;
+      let sha = f.sha;    // sha уже приходит в листинге папки; дочитывание подтвердит/обновит
       try {
         const full = await api('GET', `/repos/${state.owner}/${state.repo}/contents/${f.path}`);
         meta = JSON.parse(b64decode(full.content));
+        sha = full.sha;
       } catch (e) {
         meta = metaFromName(f.name);
       }
-      rows.push({ name: f.name, path: f.path, meta, kind: sec.kind, sha: full.sha });
+      rows.push({ name: f.name, path: f.path, meta, kind: sec.kind, sha });
       busy(true, `ЧТЕНИЕ ${++done}/${files.length}…`);
     }
   }));
@@ -473,7 +475,15 @@ async function showFiles(){
       break;
     }
     const files = (Array.isArray(items) ? items : []).filter(f => f.name.endsWith('.json'));
-    sectionsRows.push({ sec, rows: await fetchRows(sec, files) });
+    let rows;
+    try {
+      rows = await fetchRows(sec, files);
+    } catch (e) {
+      // список важнее точных меток: упало чтение содержимого — показать хотя бы имена
+      rows = files.map(f => ({ name: f.name, path: f.path,
+        meta: metaFromName(f.name), kind: sec.kind, sha: f.sha }));
+    }
+    sectionsRows.push({ sec, rows });
   }
   busy(false);
   renderFiles(sectionsRows, fatal);
@@ -932,6 +942,7 @@ window.__gb3000 = {
   startNew: (base, rows) => startNewProgram(base, rows),
   sort: byWorkout,
   todayIso,
+  showFiles,
   debugList(rows){
     const sectionsRows = SECTIONS.map(sec => ({
       sec,
