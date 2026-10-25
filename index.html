@@ -626,6 +626,7 @@ function renderEditor(){
     <div class="savebar">
       <button id="save" class="btn primary">Сохранить в облако</button>
       <button id="cancel" class="btn">Отмена</button>
+      ${cur.isNew ? '' : `<button id="del" class="btn danger" title="удалить файл из облака (потребует подтверждения)">удалить</button>`}
       <span class="faint" id="savehint"></span>
     </div>`;
   document.getElementById('wnum').oninput = e => { d.workout_number = parseNum(e.target.value); markDirty(); };
@@ -638,6 +639,8 @@ function renderEditor(){
     renderEditor();
   };
   document.getElementById('save').onclick = saveFile;
+  const del = document.getElementById('del');
+  if (del) del.onclick = deleteFile;
   document.getElementById('cancel').onclick = () => {
     if (cur.dirty && !confirm('Закрыть без сохранения?')) return;
     showFiles();
@@ -826,6 +829,40 @@ async function saveFile(){
   busy(false);
 }
 
+/* Удаление записи: первый клик — предупреждение, второй (в течение 6 с) — удаление. */
+async function deleteFile(){
+  const btn = document.getElementById('del');
+  if (!btn || cur.isNew) return;
+  if (!btn.dataset.armed) {
+    btn.dataset.armed = '1';
+    btn.textContent = 'точно удалить?';
+    setTimeout(() => {
+      if (!btn.isConnected || !btn.dataset.armed) return;
+      delete btn.dataset.armed;
+      btn.textContent = 'удалить';
+    }, 6000);
+    return;
+  }
+  btn.disabled = true;
+  busy(true, 'УДАЛЕНИЕ…');
+  try {
+    await api('DELETE', `/repos/${state.owner}/${state.repo}/contents/${cur.path}`, {
+      message: `Gym-Boy 3000: удаление — ${cur.path.split('/').pop()}`,
+      sha: cur.sha,
+    });
+    busy(false);
+    toast('✔ УДАЛЕНО — ' + cur.path);
+    cur = null;
+    await showFiles();
+  } catch (e) {
+    busy(false);
+    btn.disabled = false;
+    delete btn.dataset.armed;
+    btn.textContent = 'удалить';
+    toast('не удалено: ' + e.message, 'err');
+  }
+}
+
 window.addEventListener('beforeunload', e => {
   if (cur && cur.dirty) { e.preventDefault(); e.returnValue = ''; }
 });
@@ -833,8 +870,10 @@ window.addEventListener('beforeunload', e => {
 /* ── тестовые крючки (окружение разработки) ──────────────────────────── */
 
 window.__gb3000 = {
-  open(obj){
-    cur = { path: 'test/sample.json', sha: 'test', data: JSON.parse(JSON.stringify(obj)), dirty: false };
+  state,
+  open(obj, path, sha){
+    cur = { path: path || 'test/sample.json', sha: sha || 'test',
+            data: JSON.parse(JSON.stringify(obj)), dirty: false };
     renderEditor();
   },
   data: () => cur && cur.data,
