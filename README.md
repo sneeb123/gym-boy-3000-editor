@@ -26,7 +26,9 @@ Documentation is maintained in three languages, in this order:
   numbering too; a comma is accepted as the decimal separator. Required fields
   are checked before saving; on a conflict (the file changed in the cloud since
   it was opened) the editor offers to reload it. A public repository shows an
-  amber warning (like the app since v0.10.1), but edits are not blocked.
+  amber warning, but edits are not blocked.
+- Edits to accepted programs reach the phone on its next sync — as long as the
+  workout is not started or done yet.
 - Commits are signed `Gym-Boy 3000: правка в веб-редакторе — <file>`; result
   files (`gymboy-result/1`) are edited with the same table; unknown JSON fields
   are preserved as-is.
@@ -46,7 +48,8 @@ Documentation is maintained in three languages, in this order:
   选择会保存在本浏览器中。
 - **行为**：「总计」列自动重算（杠铃片 + 杠），组编号也是；逗号可作为小数点。
   保存前检查必填字段；若发生冲突（文件在打开后被云端修改），编辑器会建议重新
-  读取。公开仓库会显示琥珀色警告（与 v0.10.1 起的应用一样），但不会阻止修改。
+  读取。公开仓库会显示琥珀色警告，但不会阻止修改。
+- 已采纳计划的修改会在手机下次同步时生效——只要该训练尚未开始或完成。
 - 提交均带有 `Gym-Boy 3000: правка в веб-редакторе — <文件>` 前缀；结果文件
   （`gymboy-result/1`）用同一张表格编辑；未知的 JSON 字段原样保留。
 
@@ -69,8 +72,9 @@ Documentation is maintained in three languages, in this order:
   подходов — тоже; запятая принимается как десятичный разделитель. Перед
   записью — проверка обязательных полей; при конфликте (файл в облаке
   изменился с момента открытия) редактор предлагает перечитать файл.
-  Публичный репозиторий — янтарное предупреждение (как в приложении с
-  v0.10.1), но правки не блокируются.
+  Публичный репозиторий — янтарное предупреждение, но правки не блокируются.
+- Правки принятых программ доходят до телефона при следующем синке —
+  пока тренировка не начата и не выполнена.
 - Коммиты подписаны `Gym-Boy 3000: правка в веб-редакторе — <файл>`; файлы
   результатов (`gymboy-result/1`) правятся той же таблицей; незнакомые поля
   JSON сохраняются как были.
