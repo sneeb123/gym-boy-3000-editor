@@ -144,7 +144,7 @@ const LS_LANG  = 'gb3000_web.lang';
 // Меняется при каждой публикации. Открытая вчера вкладка живёт со старым кодом
 // и ничего о нём не знает — поэтому при загрузке она сверяет APP_VER с живой
 // страницей (см. versionCheck перед boot) и перезагружается при расхождении.
-const APP_VER = 'v8';
+const APP_VER = 'v9';
 
 /* ── языки ───────────────────────────────────────────────────────────── */
 
@@ -204,13 +204,14 @@ en: {
   lblOwnerRepo: 'owner / repository',
   btnCheck: 'Check',
 
-  publicRepoWarning: 'PUBLIC REPOSITORY — workout data is visible to the whole internet. Make it private: Settings → General → Danger Zone → Change visibility. (Like the app since v0.10.1, the editor only warns — the choice is yours.)',
+  publicRepoWarning: 'PUBLIC REPOSITORY — workout data is visible to the whole internet. Make it private: Settings → General → Danger Zone → Change visibility. (The editor only warns — the choice is yours.)',
 
   kindProgram: 'PROGRAM',
   kindResult: 'RESULT',
   secNewTitle: 'NEW PROGRAMS',
   secNewHint: 'the app picks these up on the next sync and moves them to accepted',
   secAccTitle: 'ACCEPTED PROGRAMS',
+  secAccHint: 'edits reach the phone on its next sync — as long as the workout is not started or done yet',
   secResTitle: 'RESULTS',
 
   repoLbl: 'repository:',
@@ -337,13 +338,14 @@ zh: {
   lblOwnerRepo: '所有者 / 仓库',
   btnCheck: '检查',
 
-  publicRepoWarning: '仓库是公开的——训练数据对所有人可见。可在 Settings → General → Danger Zone → Change visibility 中设为私有。（与 v0.10.1 起的应用一样，编辑器只提醒——决定权在你。）',
+  publicRepoWarning: '仓库是公开的——训练数据对所有人可见。可在 Settings → General → Danger Zone → Change visibility 中设为私有。（编辑器只提醒——决定权在你。）',
 
   kindProgram: '计划',
   kindResult: '结果',
   secNewTitle: '新计划',
   secNewHint: '应用会在下次同步时取走并移入已采纳',
   secAccTitle: '已采纳计划',
+  secAccHint: '修改会在手机下次同步时生效——只要该训练尚未开始或完成',
   secResTitle: '结果',
 
   repoLbl: '仓库：',
@@ -478,13 +480,14 @@ ru: {
 
   publicRepoWarning: 'РЕПОЗИТОРИЙ ПУБЛИЧНЫЙ — данные тренировок видны всему интернету. ' +
         'Сделайте его приватным: Settings → General → Danger Zone → Change visibility. ' +
-        '(Редактор, как и приложение с v0.10.1, только предупреждает — решение за вами.)',
+        '(Редактор только предупреждает — решение за вами.)',
 
   kindProgram: 'ПРОГРАММА',
   kindResult: 'РЕЗУЛЬТАТ',
   secNewTitle: 'НОВЫЕ ПРОГРАММЫ',
   secNewHint: 'приложение заберёт их при следующем синке и перенесёт в принятые',
   secAccTitle: 'ПРИНЯТЫЕ ПРОГРАММЫ',
+  secAccHint: 'правки дойдут до телефона при следующем синке — пока тренировка не начата и не выполнена',
   secResTitle: 'РЕЗУЛЬТАТЫ',
 
   repoLbl: 'репозиторий:',
@@ -859,7 +862,7 @@ function sectionInfo(dir){
   if (dir === 'programs/pending')
     return { kind: T.kindProgram, title: T.secNewTitle, hint: T.secNewHint };
   if (dir === 'programs/imported')
-    return { kind: T.kindProgram, title: T.secAccTitle, hint: '' };
+    return { kind: T.kindProgram, title: T.secAccTitle, hint: T.secAccHint };
   return { kind: T.kindResult, title: T.secResTitle, hint: '' };
 }
 
